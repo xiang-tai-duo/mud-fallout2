@@ -1,0 +1,17 @@
+/.idea
+/cmake-build-console
+/cmake-build-console/mud_fallout2
+/cmake-build-console/.ninja_deps
+/cmake-build-console/.ninja_log
+/cmake-build-console/CMakeCache.txt
+/cmake-build-console/CMakeFiles/TargetDirectories.txt
+/cmake-build-console/CMakeFiles/clion-Debug-log.txt
+/cmake-build-console/Testing/Temporary/LastTest.log
+/cmake-build-console/build.ninja
+/cmake-build-console/cmake_install.cmake
+/impl/userdef.hpp
+/cmake-build-console/CMakeFiles/clion-environment.txt
+/cmake-build-console/.cmake
+/cmake-build-console/CMakeFiles
+/cmake-build-console/libcurl-d.dll
+/cmake-build-console/zlibd1.dll
