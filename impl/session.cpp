@@ -16,6 +16,8 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <utility>
+
 #define INFINITE (-1)
 
 #endif
@@ -26,6 +28,7 @@
 #define FIGHT_LOG_DISPLAY_DELAY_MILLISECONDS    300
 #define REST_DELAY_MILLISECONDS                 1000
 #define MOVE_DELAY_MILLISECONDS                 200
+#define STATUS_DELAY_MILLISECONDS               100
 #define MAX_ENCOUNTER_RAGE                      20
 #define MAX_ENCOUNTER_MONSTER                   3
 #define MACRO_PLAYER_NAME                       "{PLAYER_NAME}"
@@ -79,14 +82,22 @@ void string_info::init(bool translate_string, int message_delay_milliseconds, co
 session::session(int socket) {
     this->socket = socket;
     this->terminal_type = TERMINAL_UNKNOWN;
-    this->language = "en";
+    this->language = "zh";
     this->player = nullptr;
-    this->buffer.clear();
+    this->socket_buffer.clear();
     this->socket_mutex = new std::mutex();
-    this->init();
+#ifdef MAC
+    // https://blog.csdn.net/qq_52572621/article/details/128720889
+    if (this->socket != SOCKET_ERROR) {
+        this->send_string(string_info(0, "\x1b[2J\x1b[1;1H"));
+        this->send_string(string_info(0, "\x1b[33m\x1b[5mCONTROL ECHO TEST\x1b[0m"));
+        this->send_string(string_info(0, utils::console::generate_colors_string()));
+    }
+#endif
+    this->main_loop();
 }
 
-void session::init() {
+void session::main_loop() {
     new std::thread([&]() -> void {
         auto b = true;
         while (b) {
@@ -97,9 +108,9 @@ void session::init() {
                 b = false;
             } else {
                 this->socket_mutex->lock();
-                this->buffer.append(receive_buffer, bytes_count);
-                while (!this->buffer.empty() && this->buffer.size() > MAX_RECEIVE_BUFFER_SIZE) {
-                    this->buffer.erase(this->buffer.begin());
+                this->socket_buffer.append(receive_buffer, bytes_count);
+                while (!this->socket_buffer.empty() && this->socket_buffer.size() > MAX_RECEIVE_BUFFER_SIZE) {
+                    this->socket_buffer.erase(this->socket_buffer.begin());
                 }
                 this->socket_mutex->unlock();
             }
@@ -108,18 +119,13 @@ void session::init() {
     auto encoding = std::string();
     auto user = std::string();
     auto password = std::string();
-#ifdef WINDOWS
-    if (this->send_string(0, WELCOME_TEXT) &&
-        this->send_string(0, CHOOSE_CONSOLE_ENCODING_TEXT) &&
-        this->send_string(0, MENU_ITEM_NAME_GBK) &&
-        this->send_string(0, MENU_ITEM_NAME_UTF8) &&
-        this->read_line(encoding) &&
-        this->send_new_line(session)) {
-#else
-    if (this->send_string(string_info(0, WELCOME_TEXT))) {
-#endif
+    if (this->send_string(string_info(0, WELCOME_TEXT)) &&
+        this->send_string(string_info(0, CHOOSE_CONSOLE_ENCODING_TEXT)) &&
+        this->send_string(string_info(0, MENU_ITEM_NAME_GBK)) &&
+        this->send_string(string_info(0, MENU_ITEM_NAME_UTF8)) &&
+        this->send_string(string_info(0, MENU_ITEM_NAME_WEB)) &&
+        this->read_line(encoding)) {
         if (this->send_string(string_info(0, REQUIRE_USER_NAME_TEXT)) &&
-            this->clear_buffer() &&
             this->read_line(user) &&
             this->send_string(string_info(0, REQUIRE_PASSCODE_TEXT)) &&
             this->read_line(password)) {
@@ -127,21 +133,29 @@ void session::init() {
                 this->terminal_type = TERMINAL_WINDOWS;
             } else if (encoding.starts_with("2")) {
                 this->terminal_type = TERMINAL_MACOS;
+            } else if (encoding.starts_with("3")) {
+                this->terminal_type = TERMINAL_WEB;
             }
             auto p = session::login(user, password);
             if (p) {
+                auto b = true;
                 this->player = p;
                 this->send_new_line();
                 this->send_stage_description();
                 if (!player->events.empty()) {
-                    this->send_new_line();
-                    this->send_events();
+                    b = b && this->send_new_line();
+                    b = b && this->send_events();
                 }
-                auto b = true;
+                if (player->health_point <= player->max_health_point * 0.2) {
+                    b = b && this->send_string(utils::console::red("警告：当前生命值低于20%%"));
+                }
                 auto command = std::string();
                 while (b && this->read_line(command)) {
                     b = this->raise_event(command);
                     this->player->save();
+                    if (player->health_point <= player->max_health_point * 0.2) {
+                        b = b && this->send_string(utils::console::red("警告：当前生命值低于20%%"));
+                    }
                 }
             } else {
                 send_string(WRONG_USER_NAME_TEXT);
@@ -160,11 +174,12 @@ std::string session::read(int timeout) {
     auto s = std::string();
     auto start_time = std::chrono::high_resolution_clock::now();
     auto is_timeout = false;
+    this->clear_socket_buffer();
     while (!is_timeout) {
         this->socket_mutex->lock();
-        if (!this->buffer.empty()) {
-            s = this->buffer.at(0);
-            this->buffer.erase(this->buffer.begin());
+        if (!this->socket_buffer.empty()) {
+            s = this->socket_buffer.at(0);
+            this->socket_buffer.erase(this->socket_buffer.begin());
         }
         this->socket_mutex->unlock();
         if (s.empty()) {
@@ -192,11 +207,12 @@ std::string session::read_line(int timeout) {
     auto s = std::string();
     auto start_time = std::chrono::high_resolution_clock::now();
     auto is_timeout = false;
+    this->clear_socket_buffer();
     while (!is_timeout) {
         this->socket_mutex->lock();
-        if (!this->buffer.empty()) {
-            s += this->buffer.at(0);
-            this->buffer.erase(this->buffer.begin());
+        if (!this->socket_buffer.empty()) {
+            s += this->socket_buffer.at(0);
+            this->socket_buffer.erase(this->socket_buffer.begin());
         }
         this->socket_mutex->unlock();
         if (s.ends_with('\n')) {
@@ -228,9 +244,9 @@ bool session::read_line(std::string &s) {
     return !s.empty();
 }
 
-bool session::clear_buffer() {
+bool session::clear_socket_buffer() {
     this->socket_mutex->lock();
-    this->buffer.clear();
+    this->socket_buffer.clear();
     this->socket_mutex->unlock();
     return true;
 }
@@ -271,17 +287,6 @@ std::string session::highlight_keywords(const std::string &s) {
     for (auto it = mud_fallout2::engine::keywords.begin(); it != mud_fallout2::engine::keywords.end(); it++) {
         str = utils::strings::replace(str, it.key(), utils::strings::format("%s%s\x1b[0m", it.value().get<std::string>().c_str(), it.key().c_str()));
     }
-    if (str.starts_with("1.")) { str = "\x1b[32m1.\x1b[0m" + str.substr(2); }
-    if (str.starts_with("2.")) { str = "\x1b[32m2.\x1b[0m" + str.substr(2); }
-    if (str.starts_with("3.")) { str = "\x1b[32m3.\x1b[0m" + str.substr(2); }
-    if (str.starts_with("4.")) { str = "\x1b[32m4.\x1b[0m" + str.substr(2); }
-    if (str.starts_with("5.")) { str = "\x1b[32m5.\x1b[0m" + str.substr(2); }
-    if (str.starts_with("6.")) { str = "\x1b[32m6.\x1b[0m" + str.substr(2); }
-    if (str.starts_with("7.")) { str = "\x1b[32m7.\x1b[0m" + str.substr(2); }
-    if (str.starts_with("8.")) { str = "\x1b[32m8.\x1b[0m" + str.substr(2); }
-    if (str.starts_with("9.")) { str = "\x1b[32m9.\x1b[0m" + str.substr(2); }
-    if (str.starts_with("x.")) { str = "\x1b[32mx.\x1b[0m" + str.substr(2); }
-    if (str.starts_with("z.")) { str = "\x1b[32mz.\x1b[0m" + str.substr(2); }
     return str;
 }
 
@@ -321,6 +326,9 @@ bool session::send_string(string_info string_info, ...) {
 #endif
                 for (auto &line: utils::strings::split(s, '\n')) {
                     auto message = utils::strings::format("[%s]> %s\r\n", utils::datetime::now().c_str(), line.c_str());
+                    if (this->terminal_type == TERMINAL_WEB) {
+                        message = utils::console::clear_color(message);
+                    }
                     auto bytes = send(this->socket, message.c_str(), (int) message.size(), 0);
                     if (bytes == SOCKET_ERROR) {
                         this->socket = SOCKET_ERROR;
@@ -358,31 +366,36 @@ bool session::send_response() {
     return b;
 }
 
-void session::send_events() {
+bool session::send_events() {
+    auto b = true;
     if (this->player) {
         this->send_string(string_info(0, EVENTS_LIST_TEXT));
         auto events = this->player->get_available_events();
         auto index = 1;
         for (auto it = events.begin(); it != events.end(); it++) {
-            this->send_string(string_info(false, 0, "%d. %s"), index++, translate(it.key(), this->language).c_str());
+            b = b && this->send_string(string_info(false, 0, "%s. %s"),
+                                       utils::console::yellow(utils::strings::itoa(index++)).c_str(),
+                                       translate(it.key(), this->language).c_str());
         }
-        this->send_string(string_info(0, MENU_ITEM_NAME_STATUS));
-        this->send_string(string_info(0, MENU_ITEM_NAME_REST));
+        b = b && this->send_string(string_info(0, utils::strings::replace(MENU_ITEM_NAME_STATUS, "x.", "\x1b[33mx\x1b[0m.")));
+        b = b && this->send_string(string_info(0, utils::strings::replace(MENU_ITEM_NAME_REST, "z.", "\x1b[33mz\x1b[0m.")));
     }
+    return b;
 }
 
 bool session::send_status(const std::string &command) {
     auto b = false;
     if (MENU_ITEM_NAME_STATUS.starts_with(command)) {
-        send_string(string_info("名字：%s"), this->player->name.c_str());
-        send_string(string_info("等级：%d"), this->player->level);
-        send_string(string_info("生命值：%d"), this->player->health_point);
-        send_string(string_info("攻击力：%d"), this->player->power);
-        send_string(string_info("防御力：%d"), this->player->defensive);
-        send_string(string_info("战斗顺序：%d"), this->player->agility);
-        send_string(string_info("武器：长狙击枪"));
-        send_string(string_info("防具：防弹背心"));
-        send_string(string_info("经验值：%d"), this->player->experience);
+        this->send_string(string_info(STATUS_DELAY_MILLISECONDS, "名字：%s"), utils::console::yellow(this->player->name).c_str());
+        this->send_string(string_info(STATUS_DELAY_MILLISECONDS, "等级：%s"), utils::console::yellow(utils::strings::itoa(this->player->level)).c_str());
+        this->send_string(string_info(STATUS_DELAY_MILLISECONDS, "生命值：%s"), utils::console::yellow(utils::strings::itoa(this->player->health_point)).c_str());
+        this->send_string(string_info(STATUS_DELAY_MILLISECONDS, "最大生命值：%s"), utils::console::yellow(utils::strings::itoa(this->player->max_health_point)).c_str());
+        this->send_string(string_info(STATUS_DELAY_MILLISECONDS, "攻击力：%s"), utils::console::yellow(utils::strings::itoa(this->player->power)).c_str());
+        this->send_string(string_info(STATUS_DELAY_MILLISECONDS, "防御力：%s"), utils::console::yellow(utils::strings::itoa(this->player->defensive)).c_str());
+        this->send_string(string_info(STATUS_DELAY_MILLISECONDS, "战斗顺序：%s"), utils::console::yellow(utils::strings::itoa(this->player->agility)).c_str());
+        this->send_string(string_info(STATUS_DELAY_MILLISECONDS, "武器：\x1b[33m空手\x1b[0m"));
+        this->send_string(string_info(STATUS_DELAY_MILLISECONDS, "防具：\x1b[33m避难所防护服\x1b[0m"));
+        this->send_string(string_info(STATUS_DELAY_MILLISECONDS, "经验值：%s"), utils::console::yellow(utils::strings::itoa(this->player->experience)).c_str());
         this->send_new_line();
         b = true;
     }
@@ -420,10 +433,10 @@ bool session::raise_event(const std::string &event_index) {
         if (this->raise_encounter() && this->player->is_dead()) {
             std::vector<std::string> game_over;
             game_over.emplace_back("你在一次战斗中不幸遇难，沙尘暴沙漠将你的残骸淹没。");
-            game_over.emplace_back("由于缺少水净化芯片，阿罗由的人们在一次沙尘暴之后，决定撤离这个地方，");
-            game_over.emplace_back("人们也渐渐的忘记了你的一切...");
-            game_over.emplace_back("游戏结束。");
-            send_string(game_over);
+            game_over.emplace_back("由于缺少水净化芯片来净化水源，阿罗由的人们决定在下一次辐射风暴之前撤离这个地方，");
+            game_over.emplace_back("同时人们也渐渐的忘记了你的一切...");
+            this->send_string(game_over);
+            this->send_string(utils::console::red(GAME_OVER_TEXT));
             b = false;
         } else {
             this->send_response();
@@ -440,11 +453,14 @@ bool session::send_rest(const std::string &command) {
     if (MENU_ITEM_NAME_REST.starts_with(command)) {
         b = true;
         auto rest_count = 0;
-        while (b && this->read(REST_DELAY_MILLISECONDS).empty() && this->player->health_point < this->player->max_health_point) {
+        while (b && this->read(REST_DELAY_MILLISECONDS).empty()) {
             this->player->add_health_point(this->player->health_point_recovery_rate);
-            auto native = translate("正在休息...　当前生命值：{1}/{2}", this->language);
-            native = utils::strings::replace(native, "{1}", utils::strings::itoa(this->player->health_point));
-            native = utils::strings::replace(native, "{2}", utils::strings::itoa(this->player->max_health_point));
+            auto native = translate("生命值已满，输入任意命令结束...", this->language);
+            if (this->player->health_point < this->player->max_health_point) {
+                native = translate("正在休息，输入任意命令结束...　当前生命值：{1}/{2}", this->language);
+            }
+            native = utils::strings::replace(native, "{1}", highlight_health_point(this->player->max_health_point, this->player->health_point));
+            native = utils::strings::replace(native, "{2}", utils::console::yellow(utils::strings::itoa(this->player->max_health_point)));
             b = this->send_string(string_info(false, 0, native));
             rest_count++;
         }
@@ -465,7 +481,9 @@ bool session::raise_encounter() {
         while (duration > 0 && !this->player->is_dead()) {
             auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start_time).count();
             auto progress = milliseconds >= duration ? 100 : (int) (((double) milliseconds / (double) duration) * 100);
-            this->send_string(string_info(false, MOVE_DELAY_MILLISECONDS, "%s... (%d%%)"), translate(encounter, this->language).c_str(), MIN(progress, 100));
+            this->send_string(string_info(false, MOVE_DELAY_MILLISECONDS, "%s... (%s%%)"),
+                              translate(encounter, this->language).c_str(),
+                              utils::console::yellow(utils::strings::itoa(MIN(progress, 100))).c_str());
             if (progress >= 100) {
                 break;
             } else {
@@ -476,7 +494,7 @@ bool session::raise_encounter() {
                         if (!monsters_name.empty()) {
                             monsters_name += "，";
                         }
-                        monsters_name += monster->name;
+                        monsters_name += utils::console::yellow(monster->name);
                     }
                     this->send_string(string_info(false, MESSAGE_DELAY_MILLISECONDS, "%s%s"), translate("你遇到了：", this->language).c_str(), monsters_name.c_str());
                     this->fight(monsters);
@@ -525,7 +543,7 @@ std::vector<character *> session::generate_random_monsters() const {
     return monsters;
 }
 
-bool session::fight(std::vector<character *> attackers1, std::vector<character *> attackers2) const {
+bool session::fight(std::vector<character *> characters1, std::vector<character *> characters2) const {
     auto p = const_cast<session *>(this);
     auto b = true;
     auto find_alive = [&](std::vector<character *> &group) -> std::vector<character *> {
@@ -538,19 +556,27 @@ bool session::fight(std::vector<character *> attackers1, std::vector<character *
         return alive;
     };
 
-    auto find_fastest_character = [&](std::vector<character *> &group1, std::vector<character *> &group2) -> character * {
-        auto live1 = find_alive(group1);
-        auto live2 = find_alive(group2);
-        character *fastest = nullptr;
-        for (auto &e: live1) {
-            if (fastest == nullptr || fastest->agility < e->agility) {
-                fastest = e;
+    auto pickup_fastest_character = [&](std::vector<character *> &characters1, std::vector<character *> &characters2, bool &is_characters1) -> character * {
+        auto fastest = (character *) nullptr;
+        auto iterator = std::vector<character *>::iterator();
+        for (auto it = characters1.begin(); it != characters1.end(); it++) {
+            if (fastest == nullptr || fastest->agility < (*it)->agility) {
+                fastest = *it;
+                iterator = it;
+                is_characters1 = true;
             }
         }
-        for (auto &e: live2) {
-            if (fastest == nullptr || fastest->agility < e->agility) {
-                fastest = e;
+        for (auto it = characters2.begin(); it != characters2.end(); it++) {
+            if (fastest == nullptr || fastest->agility < (*it)->agility) {
+                fastest = *it;
+                iterator = it;
+                is_characters1 = false;
             }
+        }
+        if (is_characters1) {
+            characters1.erase(iterator);
+        } else {
+            characters2.erase(iterator);
         }
         return fastest;
     };
@@ -564,76 +590,102 @@ bool session::fight(std::vector<character *> attackers1, std::vector<character *
         }
         return knock_down == characters.size();
     };
-    auto is_done = [&](std::vector<character *> &attackers1, std::vector<character *> &attackers2) -> bool {
+    auto is_fight_done = [&](std::vector<character *> &attackers1, std::vector<character *> &attackers2) -> bool {
         return is_all_knock_down(attackers1) || is_all_knock_down(attackers2);
     };
 
-    auto fighting = [&](const character *attacker,
-                        std::vector<character *> &attacker_group,
-                        std::vector<character *> &defensive_group) -> bool {
+    auto fighting = [&](character *attacker, std::vector<class character *> &defenders) -> bool {
         auto b = true;
-        auto alive = find_alive(defensive_group);
-        if (!alive.empty()) {
-            auto damage = (int) ((attacker->power - alive.at(0)->defensive) * (utils::math::random(90, 110) / 100.0));
+        auto _defenders = find_alive(defenders);
+        if (!_defenders.empty()) {
+            auto defender = _defenders.at(0);
+            auto damage = (int) ((attacker->power - defender->defensive) * (utils::math::random(90, 110) / 100.0));
             if (damage <= 0) {
                 damage = 1;
             }
-            auto previous_health_point = alive.at(0)->health_point;
-            alive.at(0)->add_health_point(damage * -1);
+            auto previous_health_point = defender->health_point;
+            defender->add_health_point(damage * -1);
 
             auto native = translate("{1}发起了攻击，对{2}造成了{3}点伤害，({4}的生命值：{5} -> {6})。", this->language);
-            native = utils::strings::replace(native, "{1}", translate(attacker->is_player() ? "你" : attacker->name.c_str(), this->language));
-            native = utils::strings::replace(native, "{2}", translate(alive.at(0)->is_player() ? "你" : alive.at(0)->name.c_str(), this->language));
-            native = utils::strings::replace(native, "{3}", utils::strings::format("\x1b[33m%d\x1b[0m", damage));
-            native = utils::strings::replace(native, "{4}", translate(alive.at(0)->is_player() ? "你" : alive.at(0)->name.c_str(), this->language));
-            native = utils::strings::replace(native, "{5}", highlight_health_point(alive.at(0)->max_health_point, previous_health_point));
-            native = utils::strings::replace(native, "{6}", highlight_health_point(alive.at(0)));
+            native = utils::strings::replace(native, "{1}", utils::console::yellow(translate(attacker->is_player() ? "你" : attacker->name.c_str(), this->language)));
+            native = utils::strings::replace(native, "{2}", utils::console::yellow(translate(defender->is_player() ? "你" : defender->name.c_str(), this->language)));
+            native = utils::strings::replace(native, "{3}", utils::console::yellow(utils::strings::itoa(damage)));
+            native = utils::strings::replace(native, "{4}", translate(defender->is_player() ? "你" : defender->name.c_str(), this->language));
+            native = utils::strings::replace(native, "{5}", highlight_health_point(defender->max_health_point, previous_health_point));
+            native = utils::strings::replace(native, "{6}", highlight_health_point(defender));
             if (p->send_string(string_info(false, FIGHT_LOG_DISPLAY_DELAY_MILLISECONDS, native))) {
-                if (alive.at(0)->is_dead()) {
+                if (defender->is_dead()) {
                     native = translate("{1}被打倒了。", this->language);
-                    native = utils::strings::replace(native, "{1}", translate(alive.at(0)->is_player() ? "你" : alive.at(0)->name.c_str(), this->language));
-                    b = p->send_string(string_info(false, FIGHT_LOG_DISPLAY_DELAY_MILLISECONDS, native));
+                    native = utils::strings::replace(native, "{1}", translate(defender->is_player() ? "你" : defender->name.c_str(), this->language));
+                    b = b && p->send_string(string_info(false, FIGHT_LOG_DISPLAY_DELAY_MILLISECONDS, native));
+                    if (b && attacker->is_player() && defender->experience > 0) {
+                        native = utils::console::green(translate("你获得了{1}点经验值。", this->language));
+                        native = utils::strings::replace(native, "{1}", utils::console::yellow(utils::strings::itoa(defender->experience)) + "\x1b[32m");
+                        b = b && p->send_string(string_info(false, FIGHT_LOG_DISPLAY_DELAY_MILLISECONDS, native));
+                        auto previous_level = attacker->level;
+                        auto previous_max_health_point = attacker->max_health_point;
+                        auto previous_power = attacker->power;
+                        auto previous_defensive = attacker->defensive;
+                        auto previous_agility = attacker->agility;
+                        attacker->add_experience(defender->experience);
+                        if (attacker->level != previous_level) {
+                            auto report_level_detail = [&](const std::string &ability_name, int value, int previous_value) -> bool {
+                                native = translate("你的{1}提高了{2}点，{3} -> {4}。", this->language);
+                                native = utils::strings::replace(native, "{1}", utils::console::yellow(translate(ability_name, this->language)) + "\x1b[32m");
+                                native = utils::strings::replace(native, "{2}", utils::console::yellow(utils::strings::itoa(value - previous_value)) + "\x1b[32m");
+                                native = utils::strings::replace(native, "{3}", utils::console::yellow(utils::strings::itoa(previous_value)) + "\x1b[32m");
+                                native = utils::strings::replace(native, "{4}", utils::console::yellow(utils::strings::itoa(value)) + "\x1b[32m");
+                                return p->send_string(string_info(false, FIGHT_LOG_DISPLAY_DELAY_MILLISECONDS, native));
+                            };
+                            native = utils::console::green(translate("你升级了！。", this->language));
+                            b = b && report_level_detail("最大生命值", attacker->power, previous_power);
+                            b = b && report_level_detail("力量", attacker->power, previous_power);
+                            b = b && report_level_detail("防御", attacker->defensive, previous_defensive);
+                            b = b && report_level_detail("敏捷", attacker->agility, previous_agility);
+                        }
+                    }
                 }
             } else {
                 b = false;
             }
         }
-        if (b) {
-            for (auto it = attacker_group.begin(); it != attacker_group.end(); it++) {
-                if (*it == attacker) {
-                    attacker_group.erase(it);
-                    break;
-                }
-            }
-        }
         return b;
     };
 
-    auto pending_attackers1 = find_alive(attackers1);
-    auto pending_attackers2 = find_alive(attackers2);
-
-    while (b && !is_done(attackers1, attackers2)) {
-        auto fastest = find_fastest_character(pending_attackers1, pending_attackers2);
-        auto is_fastest_belong_group1 = false;
-        for (auto &e: attackers1) {
-            if (fastest == e) {
-                is_fastest_belong_group1 = true;
+    auto remove_character = [&](const character *character, std::vector<class character *> &characters) -> void {
+        for (auto it = characters.begin(); it != characters.end(); it++) {
+            if (*it == character) {
+                characters.erase(it);
                 break;
             }
         }
-        if (is_fastest_belong_group1) {
-            b = fighting(fastest, pending_attackers1, attackers2);
-        } else {
-            b = fighting(fastest, pending_attackers2, attackers1);
-        }
+    };
 
-        // All pending attackers are executed, or
-        // The attacker who is pending for attack may already be knocked down in previous round,
-        // so check if the attacker who is knocked down, if the attacker has been knocked out, then find a new character
-        if ((pending_attackers1.empty() && pending_attackers2.empty()) ||
-            (is_all_knock_down(pending_attackers1) && is_all_knock_down(pending_attackers2))) {
-            pending_attackers1 = find_alive(attackers1);
-            pending_attackers2 = find_alive(attackers2);
+    // The fastest character is calculated from attack group 1 and attack group 2,
+    // Once calculated, the fastest character pointer is removed from the attack group,
+    // Next time when the calculation is performing, the character will not be in a repeat battle.
+    // It is important to note here that both attack group 1 and attack group 2 create a copy from the
+    // original attack group 1 and the original attack group 2 for calculation.
+    // If the character belongs to attack group 1, then let him fight against attack group 2,
+    // if the character belongs to attack group 2, then let him fight against attack group 1.
+    auto attackers1 = find_alive(characters1);
+    auto attackers2 = find_alive(characters2);
+    auto _attackers1 = std::vector<character *>(attackers1);
+    auto _attackers2 = std::vector<character *>(attackers2);
+    while (b && !is_fight_done(attackers1, attackers2)) {
+        auto is_character1 = true;
+        auto fastest = pickup_fastest_character(_attackers1, _attackers2, is_character1);
+        if (fastest) {
+            b = fighting(fastest, is_character1 ? attackers2 : attackers1);
+
+            // All pending attackers are executed or the attacker who is pending for attack may already be knocked down in previous round,
+            // so check if the attacker who is knocked down, if the attacker has been knocked out, then find a new character
+            if ((_attackers1.empty() && _attackers2.empty()) || (is_all_knock_down(_attackers1) && is_all_knock_down(_attackers2))) {
+                _attackers1 = find_alive(attackers1);
+                _attackers2 = find_alive(attackers2);
+            }
+        } else {
+            break;
         }
     }
     return b;

@@ -18,7 +18,8 @@
       "max_health_point": 12,
       "power": 3,
       "defensive": 1,
-      "agility": 1
+      "agility": 1,
+      "experience": 1
     },
     {
       "name": "蝎子",
@@ -26,7 +27,8 @@
       "max_health_point": 16,
       "power": 3,
       "defensive": 1,
-      "agility": 2
+      "agility": 2,
+      "experience": 2
     }
   ],
   "events": {

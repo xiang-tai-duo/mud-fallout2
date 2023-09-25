@@ -18,6 +18,8 @@ if (CMAKE_SYSTEM_NAME MATCHES "Windows")
     link_libraries(ws2_32)
     add_definitions(-DWINDOWS)
     add_definitions(-DWIN32_LEAN_AND_MEAN)
+else()
+    add_definitions(-DMAC)
 endif ()
 
 if (NOT EXISTS "${CMAKE_SOURCE_DIR}/impl/userdef.hpp")

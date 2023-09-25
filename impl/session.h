@@ -16,6 +16,7 @@
 #define TERMINAL_UNKNOWN                        0
 #define TERMINAL_WINDOWS                        1
 #define TERMINAL_MACOS                          2
+#define TERMINAL_WEB                            3
 
 #define MESSAGE_DELAY_MILLISECONDS              1000
 
@@ -52,7 +53,7 @@ public:
     int terminal_type;
     std::string language;
     character *player;
-    std::string buffer;
+    std::string socket_buffer;
 
     [[maybe_unused]] inline std::string read();
 
@@ -64,7 +65,7 @@ public:
 
     [[maybe_unused]] inline bool read_line(std::string &);
 
-    [[maybe_unused]] inline bool clear_buffer();
+    [[maybe_unused]] inline bool clear_socket_buffer();
 
     [[maybe_unused]] [[nodiscard]] inline std::string replace_variable(const std::string &) const;
 
@@ -74,7 +75,7 @@ public:
 
     [[maybe_unused]] inline bool send_new_line();
 
-    [[maybe_unused]] inline void send_events();
+    [[maybe_unused]] inline bool send_events();
 
     [[maybe_unused]] inline bool raise_event(const std::string &);
 
@@ -101,7 +102,7 @@ public:
     [[maybe_unused]] static inline std::string highlight_health_point(const character *);
 
 protected:
-    void init();
+    void main_loop();
 
     std::mutex *socket_mutex;
 };

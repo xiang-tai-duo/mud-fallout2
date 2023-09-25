@@ -51,15 +51,16 @@ character *character::create() {
     return p;
 }
 
-character *character::create(const utils::ordered_json &node) {
+character *character::create(const utils::ordered_json &json) {
     auto p = new character();
-    p->name = PROPERTY_NAME(node);
-    p->level = PROPERTY_LEVEL(node);
-    p->health_point = PROPERTY_HEALTH_POINT(node);
-    p->max_health_point = PROPERTY_MAX_HEALTH_POINT(node);
-    p->power = PROPERTY_POWER(node);
-    p->defensive = PROPERTY_DEFENSIVE(node);
-    p->agility = PROPERTY_AGILITY(node);
+    p->name = PROPERTY_NAME(json);
+    p->level = PROPERTY_LEVEL(json);
+    p->health_point = PROPERTY_HEALTH_POINT(json);
+    p->max_health_point = PROPERTY_MAX_HEALTH_POINT(json);
+    p->power = PROPERTY_POWER(json);
+    p->defensive = PROPERTY_DEFENSIVE(json);
+    p->agility = PROPERTY_AGILITY(json);
+    p->experience = PROPERTY_EXPERIENCE(json);
     return p;
 }
 
@@ -80,11 +81,21 @@ void character::add_health_point(int value) {
     } else if (this->health_point > this->max_health_point) {
         this->health_point = this->max_health_point;
     }
-    this->save();
 }
 
 void character::add_health_point() {
     this->add_health_point(this->health_point_recovery_rate);
+}
+
+void character::add_experience(int value) {
+    this->experience += value;
+    while (this->experience >= LEVEL_TABLE.get_experience(this->level + 1)) {
+        this->level++;
+        this->max_health_point += utils::math::random(1, 6);
+        this->power += utils::math::random(1, 3);
+        this->defensive += utils::math::random(1, 2);
+        this->agility += utils::math::random(1, 2);
+    }
 }
 
 bool character::is_dead() const {
@@ -100,9 +111,11 @@ character *character::load(const utils::ordered_json &json) {
     character->health_point = utils::json::get_integer(json, "health_point");
     character->max_health_point = utils::json::get_integer(json, "max_health_point");
     character->energy_point = utils::json::get_integer(json, "energy_point");
+    character->max_energy_point = utils::json::get_integer(json, "max_energy_point");
     character->power = utils::json::get_integer(json, "power");
     character->defensive = utils::json::get_integer(json, "defensive");
     character->agility = utils::json::get_integer(json, "agility");
+    character->experience = utils::json::get_integer(json, "experience");
     character->stage = stages.get(utils::json::get_string(json, "stage"));
     character->events = character->stage;
     character->execute("");
@@ -122,9 +135,11 @@ void character::save() {
         json["health_point"] = this->health_point;
         json["max_health_point"] = this->max_health_point;
         json["energy_point"] = this->energy_point;
+        json["max_energy_point"] = this->max_energy_point;
         json["power"] = this->power;
         json["defensive"] = this->defensive;
         json["agility"] = this->agility;
+        json["experience"] = this->experience;
         json["stage"] = PROPERTY_ID(this->stage);
         std::filesystem::create_directories(SAVE_DIRECTORY_NAME);
         std::ofstream file(utils::strings::format("%s/%s.json", SAVE_DIRECTORY_NAME, this->name.c_str()));
@@ -160,12 +175,12 @@ utils::ordered_json character::get_available_events() {
     return this->get_available_events(this->events);
 }
 
-utils::ordered_json character::execute_event(const utils::ordered_json &node, const std::string &name) {
+utils::ordered_json character::execute_event(const utils::ordered_json &node, const std::string &_name) {
     auto response = utils::ordered_json();
-    auto events = this->get_available_events(node);
-    if (!events.empty()) {
-        for (auto it = events.begin(); it != events.end(); it++) {
-            if (it.key() == name) {
+    auto _events = this->get_available_events(node);
+    if (!_events.empty()) {
+        for (auto it = _events.begin(); it != _events.end(); it++) {
+            if (it.key() == _name) {
                 response = it.value();
                 break;
             }

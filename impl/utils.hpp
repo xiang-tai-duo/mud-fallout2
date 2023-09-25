@@ -96,6 +96,8 @@ namespace utils {
 
     namespace strings {
         inline std::string format(std::string f, ...);
+
+        inline std::string replace(const std::string&, const std::string &, const std::string &);
     }
 }
 
@@ -138,6 +140,43 @@ namespace utils {
     };
 
     namespace console {
+        inline std::string generate_colors_string() {
+            std::string s;
+            s += utils::strings::format("\x1b[30m\\x1b[30m\x1b[0m\n");
+            s += utils::strings::format("\x1b[31m\\x1b[31m\x1b[0m\n");
+            s += utils::strings::format("\x1b[32m\\x1b[32m\x1b[0m\n");
+            s += utils::strings::format("\x1b[33m\\x1b[33m\x1b[0m\n");
+            s += utils::strings::format("\x1b[34m\\x1b[34m\x1b[0m\n");
+            s += utils::strings::format("\x1b[35m\\x1b[35m\x1b[0m\n");
+            s += utils::strings::format("\x1b[36m\\x1b[36m\x1b[0m\n");
+            s += utils::strings::format("\x1b[37m\\x1b[37m\x1b[0m\n");
+            s += utils::strings::format("\x1b[40;37m\\x1b[40;37m\x1b[0m\n");
+            s += utils::strings::format("\x1b[41;37m\\x1b[41;37m\x1b[0m\n");
+            s += utils::strings::format("\x1b[42;37m\\x1b[42;37m\x1b[0m\n");
+            s += utils::strings::format("\x1b[43;37m\\x1b[43;37m\x1b[0m\n");
+            s += utils::strings::format("\x1b[44;37m\\x1b[44;37m\x1b[0m\n");
+            s += utils::strings::format("\x1b[45;37m\\x1b[45;37m\x1b[0m\n");
+            s += utils::strings::format("\x1b[46;37m\\x1b[46;37m\x1b[0m\n");
+            s += utils::strings::format("\x1b[47;37m\\x1b[47;37m\x1b[0m\n");
+            s += utils::strings::format("\x1b[90;30m\\x1b[90;30m\x1b[0m\n");
+            s += utils::strings::format("\x1b[91;31m\\x1b[91;31m\x1b[0m\n");
+            s += utils::strings::format("\x1b[92;32m\\x1b[92;32m\x1b[0m\n");
+            s += utils::strings::format("\x1b[93;33m\\x1b[93;33m\x1b[0m\n");
+            s += utils::strings::format("\x1b[94;34m\\x1b[94;34m\x1b[0m\n");
+            s += utils::strings::format("\x1b[95;35m\\x1b[95;35m\x1b[0m\n");
+            s += utils::strings::format("\x1b[96;36m\\x1b[96;36m\x1b[0m\n");
+            s += utils::strings::format("\x1b[97;37m\\x1b[97;37m\x1b[0m\n");
+            s += utils::strings::format("\x1b[100;90;40;37m\\x1b[100;90;40;37m\x1b[0m\n");
+            s += utils::strings::format("\x1b[101;91;41;37m\\x1b[101;91;41;37m\x1b[0m\n");
+            s += utils::strings::format("\x1b[102;92;42;37m\\x1b[102;92;42;37m\x1b[0m\n");
+            s += utils::strings::format("\x1b[103;93;43;37m\\x1b[103;93;43;37m\x1b[0m\n");
+            s += utils::strings::format("\x1b[104;94;44;37m\\x1b[104;94;44;37m\x1b[0m\n");
+            s += utils::strings::format("\x1b[105;95;45;37m\\x1b[105;95;45;37m\x1b[0m\n");
+            s += utils::strings::format("\x1b[106;96;46;37m\\x1b[106;96;46;37m\x1b[0m\n");
+            s += utils::strings::format("\x1b[107;97;47;37m\\x1b[107;97;47;37m\x1b[0m\n");
+            return s;
+        }
+
         inline void trace(const std::string f, ...) {
             VA_INIT(f, f);
             printf("[%s] %s\n", datetime::now().c_str(), s.c_str());
@@ -148,6 +187,26 @@ namespace utils {
             VA_INIT(f, f);
             printf("[%s] \x1b[31m%s\x1b[0m\n", datetime::now().c_str(), s.c_str());
             fflush(stdout);
+        }
+
+        inline std::string yellow(const std::string &s) {
+            return utils::strings::format("\x1b[33m%s\x1b[0m", s.c_str());
+        }
+
+        inline std::string green(const std::string &s) {
+            return utils::strings::format("\x1b[32m%s\x1b[0m", s.c_str());
+        }
+
+        inline std::string red(const std::string &s) {
+            return utils::strings::format("\x1b[31m%s\x1b[0m", s.c_str());
+        }
+
+        inline std::string clear_color(const std::string &s) {
+            auto result = std::string(s);
+            for (auto i = 30; i <= 37; i++) {
+                result = utils::strings::replace(result, utils::strings::format("\x1b[%dm", i), "");
+            }
+            return utils::strings::replace(result, "\x1b[0m", "");
         }
     }
 
@@ -199,8 +258,8 @@ namespace utils {
             return s;
         }
 
-        inline std::string replace(std::string s, const std::string &target, const std::string &replacement) {
-            return replace(std::move(s), target, replacement, false);
+        inline std::string replace(const std::string& s, const std::string &target, const std::string &replacement) {
+            return replace(s, target, replacement, false);
         }
 
         inline std::string random(int size = 8) {

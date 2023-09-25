@@ -16,34 +16,35 @@
 #include "character.h"
 #include "utils.hpp"
 
-#define STAGE_DIRECTORY_NAME            "Stage"
-#define PROPERTY_NAME_EVENTS            "events"
-#define PROPERTY_NAME_PARENT_NODE       "parent_node"
-#define PROPERTY_NAME_RESPONSE          "response"
-#define PROPERTY_NAME_NEXT_STAGE        "next_stage"
+#define STAGE_DIRECTORY_NAME         "Stage"
+#define PROPERTY_NAME_EVENTS         "events"
+#define PROPERTY_NAME_PARENT_NODE    "parent_node"
+#define PROPERTY_NAME_RESPONSE       "response"
+#define PROPERTY_NAME_NEXT_STAGE     "next_stage"
 
-#define PROPERTY_ID(node)               utils::json::get_string(node, "id")
-#define PROPERTY_NAME(node)             utils::json::get_string(node, "name")
-#define PROPERTY_DESCRIPTION(node)      utils::json::get_strings(node, "description")
-#define PROPERTY_MONSTERS(node)         utils::json::get_object(node, "monsters")
-#define PROPERTY_EVENTS(node)           utils::json::get_object(node, PROPERTY_NAME_EVENTS)
-#define PROPERTY_ENTRANCE(node)         utils::json::get_boolean(node, "entrance")
-#define PROPERTY_PARENT_NODE(node)      utils::json::get_string(node, "parent_node")
-#define PROPERTY_NAME(node)             utils::json::get_string(node, "name")
-#define PROPERTY_LEVEL(node)            utils::json::get_integer(node, "level")
-#define PROPERTY_HEALTH_POINT(node)     utils::json::get_integer(node, "health_point")
-#define PROPERTY_MAX_HEALTH_POINT(node) utils::json::get_integer(node, "max_health_point")
-#define PROPERTY_POWER(node)            utils::json::get_integer(node, "power")
-#define PROPERTY_DEFENSIVE(node)        utils::json::get_integer(node, "defensive")
-#define PROPERTY_AGILITY(node)          utils::json::get_integer(node, "agility")
-#define PROPERTY_RESPONSE(node)         utils::json::get_strings(node, PROPERTY_NAME_RESPONSE)
-#define PROPERTY_GOT(node)              utils::json::get_strings(node, "got")
-#define PROPERTY_LOST(node)             utils::json::get_strings(node, "lost")
-#define PROPERTY_NECESSARY(node)        utils::json::get_strings(node, "necessary")
-#define PROPERTY_DENIED(node)           utils::json::get_strings(node, "denied")
-#define PROPERTY_NEXT_STAGE(node)       utils::json::get_string(node, "next_stage")
-#define PROPERTY_ENCOUNTER(node)        utils::json::get_string(node, "encounter")
-#define PROPERTY_DURATION(node)         utils::json::get_integer(node, "duration")
+#define PROPERTY_ID(x)               utils::json::get_string(x, "id")
+#define PROPERTY_NAME(x)             utils::json::get_string(x, "name")
+#define PROPERTY_DESCRIPTION(x)      utils::json::get_strings(x, "description")
+#define PROPERTY_MONSTERS(x)         utils::json::get_object(x, "monsters")
+#define PROPERTY_EVENTS(x)           utils::json::get_object(x, PROPERTY_NAME_EVENTS)
+#define PROPERTY_ENTRANCE(x)         utils::json::get_boolean(x, "entrance")
+#define PROPERTY_PARENT_NODE(x)      utils::json::get_string(x, "parent_node")
+#define PROPERTY_NAME(x)             utils::json::get_string(x, "name")
+#define PROPERTY_LEVEL(x)            utils::json::get_integer(x, "level")
+#define PROPERTY_HEALTH_POINT(x)     utils::json::get_integer(x, "health_point")
+#define PROPERTY_MAX_HEALTH_POINT(x) utils::json::get_integer(x, "max_health_point")
+#define PROPERTY_POWER(x)            utils::json::get_integer(x, "power")
+#define PROPERTY_DEFENSIVE(x)        utils::json::get_integer(x, "defensive")
+#define PROPERTY_AGILITY(x)          utils::json::get_integer(x, "agility")
+#define PROPERTY_EXPERIENCE(x)       utils::json::get_integer(x, "experience")
+#define PROPERTY_RESPONSE(x)         utils::json::get_strings(x, PROPERTY_NAME_RESPONSE)
+#define PROPERTY_GOT(x)              utils::json::get_strings(x, "got")
+#define PROPERTY_LOST(x)             utils::json::get_strings(x, "lost")
+#define PROPERTY_NECESSARY(x)        utils::json::get_strings(x, "necessary")
+#define PROPERTY_DENIED(x)           utils::json::get_strings(x, "denied")
+#define PROPERTY_NEXT_STAGE(x)       utils::json::get_string(x, "next_stage")
+#define PROPERTY_ENCOUNTER(x)        utils::json::get_string(x, "encounter")
+#define PROPERTY_DURATION(x)         utils::json::get_integer(x, "duration")
 
 #define stages stage::singleton
 

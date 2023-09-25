@@ -11,6 +11,7 @@
 #include "stages.h"
 #include "utils.hpp"
 
+#define MAX_LEVEL 999
 #define SAVE_DIRECTORY_NAME "Save"
 #define ROLE_PLAYER "player"
 
@@ -20,13 +21,13 @@ public:
 
     [[maybe_unused]] character(const character *);
 
-    [[maybe_unused]] static character* create();
+    [[maybe_unused]] static character *create();
 
-    [[maybe_unused]] static character* create(const utils::ordered_json &);
+    [[maybe_unused]] static character *create(const utils::ordered_json &);
 
-    [[maybe_unused]] static character* create(const std::string &, const std::string &, const utils::ordered_json &);
+    [[maybe_unused]] static character *create(const std::string &, const std::string &, const utils::ordered_json &);
 
-    [[maybe_unused]] static character* load(const utils::ordered_json &);
+    [[maybe_unused]] static character *load(const utils::ordered_json &);
 
     [[maybe_unused]] void save();
 
@@ -44,6 +45,8 @@ public:
 
     [[maybe_unused]] bool is_player() const;
 
+    [[maybe_unused]]void add_experience(int);
+
     std::string name;
     std::string role;
     std::string password_hash;
@@ -52,6 +55,7 @@ public:
     int health_point{};
     int max_health_point{};
     int energy_point{};
+    int max_energy_point{};
     int power{};
     int defensive{};
     int agility{};
@@ -78,5 +82,21 @@ protected:
     [[maybe_unused]] bool is_usable(const std::string &, const utils::ordered_json &);
 };
 
+static class level_table {
+public:
+    level_table() {
+        this->m_table.push_back(0);
+        for (auto i = 1; i <= MAX_LEVEL; i++) {
+            this->m_table.push_back(this->m_table[i - 1] + (int)(i * 100 * 1.287653));
+        }
+    }
+
+    int get_experience(int level) {
+        return level <= this->m_table.size() ? this->m_table[level] : INT_MAX;
+    }
+
+protected:
+    std::vector<int> m_table;
+} LEVEL_TABLE;
 
 #endif //MUD_FALLOUT_CHARACTER_H
