@@ -51,7 +51,7 @@ character *character::create() {
     return p;
 }
 
-character *character::create(const utils::ordered_json &json) {
+character *character::create(const utils::json::trace_json &json) {
     auto p = new character();
     p->name = PROPERTY_NAME(json);
     p->level = PROPERTY_LEVEL(json);
@@ -64,7 +64,7 @@ character *character::create(const utils::ordered_json &json) {
     return p;
 }
 
-character *character::create(const std::string &name, const std::string &password_hash, const utils::ordered_json &stage) {
+character *character::create(const std::string &name, const std::string &password_hash, const utils::json::trace_json &stage) {
     auto player = new character();
     player->name = name;
     player->role = ROLE_PLAYER;
@@ -102,7 +102,7 @@ bool character::is_dead() const {
     return this->health_point <= 0;
 }
 
-character *character::load(const utils::ordered_json &json) {
+character *character::load(const utils::json::trace_json &json) {
     auto character = character::create();
     character->name = utils::json::get_string(json, "name");
     character->role = utils::json::get_string(json, "role");
@@ -124,11 +124,11 @@ character *character::load(const utils::ordered_json &json) {
 
 void character::save() {
     if (!this->password_hash.empty()) {
-        auto json = utils::ordered_json();
+        auto json = utils::json::trace_json();
         json["name"] = this->name;
         json["role"] = this->role;
         json["password_hash"] = this->password_hash;
-        json["flags"] = utils::ordered_json::array();
+        json["flags"] = utils::json::trace_json::array();
         for (auto &flag: this->flags) {
             json["flags"].push_back(flag);
         }
@@ -150,8 +150,8 @@ void character::save() {
     }
 }
 
-utils::ordered_json character::get_available_events(const utils::ordered_json &node) {
-    auto available_events = utils::ordered_json();
+utils::json::trace_json character::get_available_events(const utils::json::trace_json &node) {
+    auto available_events = utils::json::trace_json();
     auto events = PROPERTY_EVENTS(node);
     if (events.empty()) {
         auto parent_node = utils::json::get_strings(this->events, PROPERTY_NAME_PARENT_NODE);
@@ -171,12 +171,12 @@ utils::ordered_json character::get_available_events(const utils::ordered_json &n
     return available_events;
 }
 
-utils::ordered_json character::get_available_events() {
+utils::json::trace_json character::get_available_events() {
     return this->get_available_events(this->events);
 }
 
-utils::ordered_json character::execute_event(const utils::ordered_json &node, const std::string &_name) {
-    auto response = utils::ordered_json();
+utils::json::trace_json character::execute_event(const utils::json::trace_json &node, const std::string &_name) {
+    auto response = utils::json::trace_json();
     auto _events = this->get_available_events(node);
     if (!_events.empty()) {
         for (auto it = _events.begin(); it != _events.end(); it++) {
@@ -208,13 +208,13 @@ std::vector<std::string> character::get_response_text() {
     return response;
 }
 
-inline utils::ordered_json character::find_event(const utils::ordered_json &node, const std::string &key) {
-    auto result = utils::ordered_json();
+inline utils::json::trace_json character::find_event(const utils::json::trace_json &node, const std::string &key) {
+    auto result = utils::json::trace_json();
     if (node.contains(key) && !node[key].empty()) {
         result = node[key];
     } else if (!result.contains(PROPERTY_NAME_RESPONSE) && node.is_object()) {
-        for (const auto &it: node) {
-            result = character::find_event(it, key);
+        for (auto it = node.begin(); it != node.end(); it++) {
+            result = character::find_event(*it, key);
             if (!result.empty()) {
                 break;
             }
@@ -223,7 +223,7 @@ inline utils::ordered_json character::find_event(const utils::ordered_json &node
     return result;
 }
 
-utils::ordered_json character::execute(const std::string &event_name) {
+utils::json::trace_json character::execute(const std::string &event_name) {
     auto response = event_name.empty() ? this->stage : this->execute_event(this->events, event_name);
     if (!response.empty()) {
         if (!response.contains(PROPERTY_NAME_EVENTS)) {
@@ -281,7 +281,7 @@ bool character::is_flag_exists(const std::string &flag) {
     return b;
 }
 
-bool character::is_usable(const std::string &name, const utils::ordered_json &node) {
+bool character::is_usable(const std::string &name, const nlohmann::ordered_json &node) {
     auto b = name != PROPERTY_NAME_PARENT_NODE;
     if (b) {
         for (auto &necessary: PROPERTY_NECESSARY(node)) {

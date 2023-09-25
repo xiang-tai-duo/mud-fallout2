@@ -1,4 +1,4 @@
-//
+﻿//
 // Created by 黄元镭 on 2023/9/18.
 //
 
@@ -119,48 +119,54 @@ void session::main_loop() {
     auto encoding = std::string();
     auto user = std::string();
     auto password = std::string();
-    if (this->send_string(string_info(0, WELCOME_TEXT)) &&
-        this->send_string(string_info(0, CHOOSE_CONSOLE_ENCODING_TEXT)) &&
-        this->send_string(string_info(0, MENU_ITEM_NAME_GBK)) &&
-        this->send_string(string_info(0, MENU_ITEM_NAME_UTF8)) &&
-        this->send_string(string_info(0, MENU_ITEM_NAME_WEB)) &&
-        this->read_line(encoding)) {
-        if (this->send_string(string_info(0, REQUIRE_USER_NAME_TEXT)) &&
-            this->read_line(user) &&
-            this->send_string(string_info(0, REQUIRE_PASSCODE_TEXT)) &&
-            this->read_line(password)) {
-            if (encoding.starts_with("1")) {
-                this->terminal_type = TERMINAL_WINDOWS;
-            } else if (encoding.starts_with("2")) {
-                this->terminal_type = TERMINAL_MACOS;
-            } else if (encoding.starts_with("3")) {
-                this->terminal_type = TERMINAL_WEB;
+    while (this->send_string(string_info(0, CHOOSE_CONSOLE_ENCODING_TEXT)) &&
+           this->send_string(string_info(0, MENU_ITEM_NAME_GBK)) &&
+           this->send_string(string_info(0, MENU_ITEM_NAME_UTF8)) &&
+           this->send_string(string_info(0, MENU_ITEM_NAME_WEB)) &&
+           this->read_line(encoding)) {
+        if (encoding.starts_with("1")) {
+            this->terminal_type = TERMINAL_WINDOWS;
+        } else if (encoding.starts_with("2")) {
+            this->terminal_type = TERMINAL_MACOS;
+        } else if (encoding.starts_with("3")) {
+            this->terminal_type = TERMINAL_WEB;
+        } else {
+            this->send_string(string_info(0, "\x1b[5m"));
+        }
+        if (this->terminal_type != TERMINAL_UNKNOWN) {
+            break;
+        }
+    }
+    if (this->terminal_type != TERMINAL_UNKNOWN &&
+        this->send_string(string_info(0, WELCOME_TEXT)) &&
+        this->send_string(string_info(0, REQUIRE_USER_NAME_TEXT)) &&
+        this->read_line(user) &&
+        this->send_string(string_info(0, REQUIRE_PASSCODE_TEXT)) &&
+        this->read_line(password)) {
+        auto p = session::login(user, password);
+        if (p) {
+            auto b = true;
+            this->player = p;
+            this->send_new_line();
+            this->send_stage_description();
+            if (!player->events.empty()) {
+                b = b && this->send_new_line();
+                b = b && this->send_events();
             }
-            auto p = session::login(user, password);
-            if (p) {
-                auto b = true;
-                this->player = p;
-                this->send_new_line();
-                this->send_stage_description();
-                if (!player->events.empty()) {
-                    b = b && this->send_new_line();
-                    b = b && this->send_events();
-                }
+            if (player->health_point <= player->max_health_point * 0.2) {
+                b = b && this->send_string(utils::console::red("警告：当前生命值低于20%%"));
+            }
+            auto command = std::string();
+            while (b && this->read_line(command)) {
+                b = this->raise_event(command);
+                this->player->save();
                 if (player->health_point <= player->max_health_point * 0.2) {
                     b = b && this->send_string(utils::console::red("警告：当前生命值低于20%%"));
                 }
-                auto command = std::string();
-                while (b && this->read_line(command)) {
-                    b = this->raise_event(command);
-                    this->player->save();
-                    if (player->health_point <= player->max_health_point * 0.2) {
-                        b = b && this->send_string(utils::console::red("警告：当前生命值低于20%%"));
-                    }
-                }
-            } else {
-                send_string(WRONG_USER_NAME_TEXT);
-                send_string(GAME_OVER_TEXT);
             }
+        } else {
+            send_string(WRONG_USER_NAME_TEXT);
+            send_string(GAME_OVER_TEXT);
         }
     }
 #ifdef WINDOWS
@@ -317,18 +323,18 @@ bool session::send_string(string_info string_info, ...) {
                 native = replace_variable(native);
                 VA_INIT(string_info, native);
                 s = highlight_keywords(s);
-#ifdef WINDOWS
-                switch (this->terminal_type) {
-                        case TERMINAL_MACOS:
-                            s = utils::strings::gbk_to_utf8(s);
-                            break;
-                    }
-#endif
                 for (auto &line: utils::strings::split(s, '\n')) {
                     auto message = utils::strings::format("[%s]> %s\r\n", utils::datetime::now().c_str(), line.c_str());
                     if (this->terminal_type == TERMINAL_WEB) {
-                        message = utils::console::clear_color(message);
+                        message = utils::console::clear_terminal_control_symbol(message);
                     }
+#ifdef WINDOWS
+                    switch (this->terminal_type) {
+                        case TERMINAL_WINDOWS:
+                            message = utils::encoding::utf8_to_gbk(message);
+                            break;
+                    }
+#endif
                     auto bytes = send(this->socket, message.c_str(), (int) message.size(), 0);
                     if (bytes == SOCKET_ERROR) {
                         this->socket = SOCKET_ERROR;
@@ -431,7 +437,7 @@ bool session::raise_event(const std::string &event_index) {
             this->send_stage_description();
         }
         if (this->raise_encounter() && this->player->is_dead()) {
-            std::vector<std::string> game_over;
+            auto game_over = std::vector<std::string>();
             game_over.emplace_back("你在一次战斗中不幸遇难，沙尘暴沙漠将你的残骸淹没。");
             game_over.emplace_back("由于缺少水净化芯片来净化水源，阿罗由的人们决定在下一次辐射风暴之前撤离这个地方，");
             game_over.emplace_back("同时人们也渐渐的忘记了你的一切...");
@@ -496,7 +502,7 @@ bool session::raise_encounter() {
                         }
                         monsters_name += utils::console::yellow(monster->name);
                     }
-                    this->send_string(string_info(false, MESSAGE_DELAY_MILLISECONDS, "%s%s"), translate("你遇到了：", this->language).c_str(), monsters_name.c_str());
+                    this->send_string(string_info(false, MESSAGE_DELAY_MILLISECONDS, "%s%s"), translate(ENCOUNTER_TEXT, this->language).c_str(), monsters_name.c_str());
                     this->fight(monsters);
                     for (auto monster: monsters) {
                         delete monster;
@@ -606,20 +612,20 @@ bool session::fight(std::vector<character *> characters1, std::vector<character 
             auto previous_health_point = defender->health_point;
             defender->add_health_point(damage * -1);
 
-            auto native = translate("{1}发起了攻击，对{2}造成了{3}点伤害，({4}的生命值：{5} -> {6})。", this->language);
-            native = utils::strings::replace(native, "{1}", utils::console::yellow(translate(attacker->is_player() ? "你" : attacker->name.c_str(), this->language)));
-            native = utils::strings::replace(native, "{2}", utils::console::yellow(translate(defender->is_player() ? "你" : defender->name.c_str(), this->language)));
+            auto native = translate(ATTACK_ROUND_TEXT, this->language);
+            native = utils::strings::replace(native, "{1}", utils::console::yellow(translate(attacker->is_player() ? YOU_TEXT : attacker->name.c_str(), this->language)));
+            native = utils::strings::replace(native, "{2}", utils::console::yellow(translate(defender->is_player() ? YOU_TEXT : defender->name.c_str(), this->language)));
             native = utils::strings::replace(native, "{3}", utils::console::yellow(utils::strings::itoa(damage)));
-            native = utils::strings::replace(native, "{4}", translate(defender->is_player() ? "你" : defender->name.c_str(), this->language));
+            native = utils::strings::replace(native, "{4}", translate(defender->is_player() ? YOU_TEXT : defender->name.c_str(), this->language));
             native = utils::strings::replace(native, "{5}", highlight_health_point(defender->max_health_point, previous_health_point));
             native = utils::strings::replace(native, "{6}", highlight_health_point(defender));
             if (p->send_string(string_info(false, FIGHT_LOG_DISPLAY_DELAY_MILLISECONDS, native))) {
                 if (defender->is_dead()) {
-                    native = translate("{1}被打倒了。", this->language);
-                    native = utils::strings::replace(native, "{1}", translate(defender->is_player() ? "你" : defender->name.c_str(), this->language));
+                    native = translate(KNOCKDOWN_TEXT, this->language);
+                    native = utils::strings::replace(native, "{1}", translate(defender->is_player() ? YOU_TEXT : defender->name.c_str(), this->language));
                     b = b && p->send_string(string_info(false, FIGHT_LOG_DISPLAY_DELAY_MILLISECONDS, native));
                     if (b && attacker->is_player() && defender->experience > 0) {
-                        native = utils::console::green(translate("你获得了{1}点经验值。", this->language));
+                        native = utils::console::green(translate(GOT_EXPERIENCE_TEXT, this->language));
                         native = utils::strings::replace(native, "{1}", utils::console::yellow(utils::strings::itoa(defender->experience)) + "\x1b[32m");
                         b = b && p->send_string(string_info(false, FIGHT_LOG_DISPLAY_DELAY_MILLISECONDS, native));
                         auto previous_level = attacker->level;
@@ -630,18 +636,18 @@ bool session::fight(std::vector<character *> characters1, std::vector<character 
                         attacker->add_experience(defender->experience);
                         if (attacker->level != previous_level) {
                             auto report_level_detail = [&](const std::string &ability_name, int value, int previous_value) -> bool {
-                                native = translate("你的{1}提高了{2}点，{3} -> {4}。", this->language);
+                                native = translate(ABILITY_UP_TEXT, this->language);
                                 native = utils::strings::replace(native, "{1}", utils::console::yellow(translate(ability_name, this->language)) + "\x1b[32m");
                                 native = utils::strings::replace(native, "{2}", utils::console::yellow(utils::strings::itoa(value - previous_value)) + "\x1b[32m");
                                 native = utils::strings::replace(native, "{3}", utils::console::yellow(utils::strings::itoa(previous_value)) + "\x1b[32m");
                                 native = utils::strings::replace(native, "{4}", utils::console::yellow(utils::strings::itoa(value)) + "\x1b[32m");
                                 return p->send_string(string_info(false, FIGHT_LOG_DISPLAY_DELAY_MILLISECONDS, native));
                             };
-                            native = utils::console::green(translate("你升级了！。", this->language));
-                            b = b && report_level_detail("最大生命值", attacker->power, previous_power);
-                            b = b && report_level_detail("力量", attacker->power, previous_power);
-                            b = b && report_level_detail("防御", attacker->defensive, previous_defensive);
-                            b = b && report_level_detail("敏捷", attacker->agility, previous_agility);
+                            native = utils::console::green(translate(LEVEL_UP_TEXT, this->language));
+                            b = b && report_level_detail(ABILITY_NAME_MAX_HEALTH_POINT_TEXT, attacker->max_health_point, previous_max_health_point);
+                            b = b && report_level_detail(ABILITY_NAME_POWER_TEXT, attacker->power, previous_power);
+                            b = b && report_level_detail(ABILITY_NAME_DEFENSIVE_TEXT, attacker->defensive, previous_defensive);
+                            b = b && report_level_detail(ABILITY_NAME_AGILITY_TEXT, attacker->agility, previous_agility);
                         }
                     }
                 }
@@ -650,15 +656,6 @@ bool session::fight(std::vector<character *> characters1, std::vector<character 
             }
         }
         return b;
-    };
-
-    auto remove_character = [&](const character *character, std::vector<class character *> &characters) -> void {
-        for (auto it = characters.begin(); it != characters.end(); it++) {
-            if (*it == character) {
-                characters.erase(it);
-                break;
-            }
-        }
     };
 
     // The fastest character is calculated from attack group 1 and attack group 2,

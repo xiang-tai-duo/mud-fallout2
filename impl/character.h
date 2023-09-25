@@ -23,17 +23,17 @@ public:
 
     [[maybe_unused]] static character *create();
 
-    [[maybe_unused]] static character *create(const utils::ordered_json &);
+    [[maybe_unused]] static character *create(const utils::json::trace_json &);
 
-    [[maybe_unused]] static character *create(const std::string &, const std::string &, const utils::ordered_json &);
+    [[maybe_unused]] static character *create(const std::string &, const std::string &, const utils::json::trace_json &);
 
-    [[maybe_unused]] static character *load(const utils::ordered_json &);
+    [[maybe_unused]] static character *load(const utils::json::trace_json &);
 
     [[maybe_unused]] void save();
 
-    [[maybe_unused]] utils::ordered_json execute(const std::string &);
+    [[maybe_unused]] utils::json::trace_json execute(const std::string &);
 
-    [[maybe_unused]] utils::ordered_json get_available_events();
+    [[maybe_unused]] utils::json::trace_json get_available_events();
 
     [[maybe_unused]] std::vector<std::string> get_response_text();
 
@@ -61,17 +61,17 @@ public:
     int agility{};
     int health_point_recovery_rate{};
     int experience{};
-    utils::ordered_json stage;
-    utils::ordered_json events;
+    utils::json::trace_json stage;
+    utils::json::trace_json events;
 
 protected:
     [[maybe_unused]] void init();
 
-    [[maybe_unused]] utils::ordered_json get_available_events(const utils::ordered_json &node);
+    [[maybe_unused]] utils::json::trace_json get_available_events(const utils::json::trace_json &node);
 
-    [[maybe_unused]] utils::ordered_json execute_event(const utils::ordered_json &node, const std::string &name);
+    [[maybe_unused]] utils::json::trace_json execute_event(const utils::json::trace_json &node, const std::string &name);
 
-    [[maybe_unused]] static utils::ordered_json find_event(const utils::ordered_json &node, const std::string &key);
+    [[maybe_unused]] static utils::json::trace_json find_event(const utils::json::trace_json &node, const std::string &key);
 
     [[maybe_unused]] void add_flag(const std::string &);
 
@@ -79,7 +79,7 @@ protected:
 
     [[maybe_unused]] bool is_flag_exists(const std::string &);
 
-    [[maybe_unused]] bool is_usable(const std::string &, const utils::ordered_json &);
+    [[maybe_unused]] bool is_usable(const std::string &, const nlohmann::ordered_json &);
 };
 
 static class level_table {

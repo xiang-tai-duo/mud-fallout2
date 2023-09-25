@@ -54,8 +54,8 @@ namespace mud_fallout2::engine {
 #ifdef WINDOWS
             auto gbk = nlohmann::ordered_json();
             for (auto it = keywords.begin(); it != keywords.end(); it++) {
-                auto key = utils::strings::utf8_to_gbk(it.key());
-                auto value = utils::strings::utf8_to_gbk(it.value().get<std::string>());
+                auto key = utils::encoding::utf8_to_gbk(it.key());
+                auto value = utils::encoding::utf8_to_gbk(it.value().get<std::string>());
                 gbk[key] = value;
             }
             keywords = gbk;

@@ -23,12 +23,14 @@
 #include <thread>
 
 #ifdef WINDOWS
+
 #include <cstdarg>
 #include <memory>
 #include <cstring>
 #include <locale>
 #include <codecvt>
 #include <Windows.h>
+
 #else
 
 #include <iconv.h>
@@ -89,91 +91,70 @@ namespace utils {
         inline std::string now();
     }
     namespace console {
-        inline void trace(const std::string f, ...);
+        inline void trace(std::string f, ...);
 
-        inline void critical(const std::string f, ...);
+        inline void critical(std::string f, ...);
     }
 
     namespace strings {
         inline std::string format(std::string f, ...);
 
-        inline std::string replace(const std::string&, const std::string &, const std::string &);
+        inline std::string replace(const std::string &, const std::string &, const std::string &);
+    }
+
+    namespace encoding {
+#ifdef WINDOWS
+#define CP_936 936
+
+        inline std::string utf8_to_codepage(const std::string &, int);
+
+        inline std::string utf8_to_mbcs(const std::string &);
+
+        inline std::string utf8_to_gbk(const std::string &);
+
+        inline std::string gbk_to_utf8(const std::string &);
+
+#endif
     }
 }
-
 namespace utils {
 
-    class ordered_json : public nlohmann::ordered_json {
-    public:
-        ordered_json() {
-#ifndef RELEASE
-            this->m_dump = this->empty() ? "{}" : nlohmann::ordered_json::dump();
-#endif
-        }
-
-        ordered_json(const basic_json &other) {
-            this->init(other);
-        }
-
-        ordered_json &operator=(const nlohmann::ordered_json &ordered_json) {
-            this->init(ordered_json);
-            return *this;
-        }
-
-        void generate_dump() {
-#ifndef RELEASE
-            this->m_dump = this->empty() ? "{}" : nlohmann::ordered_json::dump();
-#endif
-        }
-
-    protected:
-        void init(const nlohmann::ordered_json &other) {
-            nlohmann::ordered_json::operator=(other);
-#ifndef RELEASE
-            this->m_dump = this->empty() ? "{}" : nlohmann::ordered_json::dump();
-#endif
-        }
-
-#ifndef RELEASE
-        std::string m_dump;
-#endif
-    };
 
     namespace console {
         inline std::string generate_colors_string() {
             std::string s;
-            s += utils::strings::format("\x1b[30m\\x1b[30m\x1b[0m\n");
-            s += utils::strings::format("\x1b[31m\\x1b[31m\x1b[0m\n");
-            s += utils::strings::format("\x1b[32m\\x1b[32m\x1b[0m\n");
-            s += utils::strings::format("\x1b[33m\\x1b[33m\x1b[0m\n");
-            s += utils::strings::format("\x1b[34m\\x1b[34m\x1b[0m\n");
-            s += utils::strings::format("\x1b[35m\\x1b[35m\x1b[0m\n");
-            s += utils::strings::format("\x1b[36m\\x1b[36m\x1b[0m\n");
-            s += utils::strings::format("\x1b[37m\\x1b[37m\x1b[0m\n");
-            s += utils::strings::format("\x1b[40;37m\\x1b[40;37m\x1b[0m\n");
-            s += utils::strings::format("\x1b[41;37m\\x1b[41;37m\x1b[0m\n");
-            s += utils::strings::format("\x1b[42;37m\\x1b[42;37m\x1b[0m\n");
-            s += utils::strings::format("\x1b[43;37m\\x1b[43;37m\x1b[0m\n");
-            s += utils::strings::format("\x1b[44;37m\\x1b[44;37m\x1b[0m\n");
-            s += utils::strings::format("\x1b[45;37m\\x1b[45;37m\x1b[0m\n");
-            s += utils::strings::format("\x1b[46;37m\\x1b[46;37m\x1b[0m\n");
-            s += utils::strings::format("\x1b[47;37m\\x1b[47;37m\x1b[0m\n");
-            s += utils::strings::format("\x1b[90;30m\\x1b[90;30m\x1b[0m\n");
-            s += utils::strings::format("\x1b[91;31m\\x1b[91;31m\x1b[0m\n");
-            s += utils::strings::format("\x1b[92;32m\\x1b[92;32m\x1b[0m\n");
-            s += utils::strings::format("\x1b[93;33m\\x1b[93;33m\x1b[0m\n");
-            s += utils::strings::format("\x1b[94;34m\\x1b[94;34m\x1b[0m\n");
-            s += utils::strings::format("\x1b[95;35m\\x1b[95;35m\x1b[0m\n");
-            s += utils::strings::format("\x1b[96;36m\\x1b[96;36m\x1b[0m\n");
-            s += utils::strings::format("\x1b[97;37m\\x1b[97;37m\x1b[0m\n");
-            s += utils::strings::format("\x1b[100;90;40;37m\\x1b[100;90;40;37m\x1b[0m\n");
-            s += utils::strings::format("\x1b[101;91;41;37m\\x1b[101;91;41;37m\x1b[0m\n");
-            s += utils::strings::format("\x1b[102;92;42;37m\\x1b[102;92;42;37m\x1b[0m\n");
-            s += utils::strings::format("\x1b[103;93;43;37m\\x1b[103;93;43;37m\x1b[0m\n");
-            s += utils::strings::format("\x1b[104;94;44;37m\\x1b[104;94;44;37m\x1b[0m\n");
-            s += utils::strings::format("\x1b[105;95;45;37m\\x1b[105;95;45;37m\x1b[0m\n");
-            s += utils::strings::format("\x1b[106;96;46;37m\\x1b[106;96;46;37m\x1b[0m\n");
-            s += utils::strings::format("\x1b[107;97;47;37m\\x1b[107;97;47;37m\x1b[0m\n");
+            s += strings::format("\x1b[30m\\x1b[30m\x1b[0m\n");
+            s += strings::format("\x1b[31m\\x1b[31m\x1b[0m\n");
+            s += strings::format("\x1b[32m\\x1b[32m\x1b[0m\n");
+            s += strings::format("\x1b[33m\\x1b[33m\x1b[0m\n");
+            s += strings::format("\x1b[34m\\x1b[34m\x1b[0m\n");
+            s += strings::format("\x1b[35m\\x1b[35m\x1b[0m\n");
+            s += strings::format("\x1b[36m\\x1b[36m\x1b[0m\n");
+            s += strings::format("\x1b[37m\\x1b[37m\x1b[0m\n");
+            s += strings::format("\x1b[40;37m\\x1b[40;37m\x1b[0m\n");
+            s += strings::format("\x1b[41;37m\\x1b[41;37m\x1b[0m\n");
+            s += strings::format("\x1b[42;37m\\x1b[42;37m\x1b[0m\n");
+            s += strings::format("\x1b[43;37m\\x1b[43;37m\x1b[0m\n");
+            s += strings::format("\x1b[44;37m\\x1b[44;37m\x1b[0m\n");
+            s += strings::format("\x1b[45;37m\\x1b[45;37m\x1b[0m\n");
+            s += strings::format("\x1b[46;37m\\x1b[46;37m\x1b[0m\n");
+            s += strings::format("\x1b[47;37m\\x1b[47;37m\x1b[0m\n");
+            s += strings::format("\x1b[90;30m\\x1b[90;30m\x1b[0m\n");
+            s += strings::format("\x1b[91;31m\\x1b[91;31m\x1b[0m\n");
+            s += strings::format("\x1b[92;32m\\x1b[92;32m\x1b[0m\n");
+            s += strings::format("\x1b[93;33m\\x1b[93;33m\x1b[0m\n");
+            s += strings::format("\x1b[94;34m\\x1b[94;34m\x1b[0m\n");
+            s += strings::format("\x1b[95;35m\\x1b[95;35m\x1b[0m\n");
+            s += strings::format("\x1b[96;36m\\x1b[96;36m\x1b[0m\n");
+            s += strings::format("\x1b[97;37m\\x1b[97;37m\x1b[0m\n");
+            s += strings::format("\x1b[100;90;40;37m\\x1b[100;90;40;37m\x1b[0m\n");
+            s += strings::format("\x1b[101;91;41;37m\\x1b[101;91;41;37m\x1b[0m\n");
+            s += strings::format("\x1b[102;92;42;37m\\x1b[102;92;42;37m\x1b[0m\n");
+            s += strings::format("\x1b[103;93;43;37m\\x1b[103;93;43;37m\x1b[0m\n");
+            s += strings::format("\x1b[104;94;44;37m\\x1b[104;94;44;37m\x1b[0m\n");
+            s += strings::format("\x1b[105;95;45;37m\\x1b[105;95;45;37m\x1b[0m\n");
+            s += strings::format("\x1b[106;96;46;37m\\x1b[106;96;46;37m\x1b[0m\n");
+            s += strings::format("\x1b[107;97;47;37m\\x1b[107;97;47;37m\x1b[0m\n");
             return s;
         }
 
@@ -190,27 +171,32 @@ namespace utils {
         }
 
         inline std::string yellow(const std::string &s) {
-            return utils::strings::format("\x1b[33m%s\x1b[0m", s.c_str());
+            return strings::format("\x1b[33m%s\x1b[0m", s.c_str());
         }
 
         inline std::string green(const std::string &s) {
-            return utils::strings::format("\x1b[32m%s\x1b[0m", s.c_str());
+            return strings::format("\x1b[32m%s\x1b[0m", s.c_str());
         }
 
         inline std::string red(const std::string &s) {
-            return utils::strings::format("\x1b[31m%s\x1b[0m", s.c_str());
+            return strings::format("\x1b[31m%s\x1b[0m", s.c_str());
         }
 
-        inline std::string clear_color(const std::string &s) {
+        inline std::string clear_terminal_control_symbol(const std::string &s) {
             auto result = std::string(s);
-            for (auto i = 30; i <= 37; i++) {
-                result = utils::strings::replace(result, utils::strings::format("\x1b[%dm", i), "");
+            for (auto i = 0; i <= 100; i++) {
+                result = strings::replace(result, strings::format("\x1b[%dm", i), "");
             }
-            return utils::strings::replace(result, "\x1b[0m", "");
+            return result;
         }
     }
 
     namespace strings {
+        inline std::string format(std::string f, ...) {
+            VA_INIT(f, f);
+            return s;
+        }
+
         inline int atoi(const std::string a) {
             auto ptr = (char *) nullptr;
             return (int) strtol(a.c_str(), &ptr, 10);
@@ -258,7 +244,7 @@ namespace utils {
             return s;
         }
 
-        inline std::string replace(const std::string& s, const std::string &target, const std::string &replacement) {
+        inline std::string replace(const std::string &s, const std::string &target, const std::string &replacement) {
             return replace(s, target, replacement, false);
         }
 
@@ -272,11 +258,6 @@ namespace utils {
             for (int i = 0; i < size; ++i) {
                 s += alphanum[rand() % (sizeof(alphanum) - 1)];
             }
-            return s;
-        }
-
-        inline std::string format(std::string f, ...) {
-            VA_INIT(f, f);
             return s;
         }
 
@@ -303,10 +284,14 @@ namespace utils {
             }
             return result; // 返回结果
         }
+    }
+
+    namespace encoding {
 
 #ifdef WINDOWS
 #define CP_936 936
-        inline std::string utf8_to_codepage(const std::string& utf8_str, int code_page) {
+
+        inline std::string utf8_to_codepage(const std::string &utf8_str, int code_page) {
             auto s = std::string();
             int size = MultiByteToWideChar(CP_UTF8, 0, utf8_str.c_str(), -1, nullptr, 0);
             if (size > 0) {
@@ -323,18 +308,18 @@ namespace utils {
             return s;
         }
 
-        inline std::string utf8_to_mbcs(const std::string& utf8_str) {
+        inline std::string utf8_to_mbcs(const std::string &utf8_str) {
             return utf8_to_codepage(utf8_str, CP_ACP);
         }
 
-        inline std::string utf8_to_gbk(const std::string& utf8_str) {
+        inline std::string utf8_to_gbk(const std::string &utf8_str) {
             return utf8_to_codepage(utf8_str, CP_936);
         }
 
-        inline std::string gbk_to_utf8(const std::string& gbk) {
-            auto wideCharLength = MultiByteToWideChar(CP_936, 0, gbk.c_str(), (int)gbk.size(), nullptr, 0);
+        inline std::string gbk_to_utf8(const std::string &gbk) {
+            auto wideCharLength = MultiByteToWideChar(CP_936, 0, gbk.c_str(), (int) gbk.size(), nullptr, 0);
             auto wideChar = new wchar_t[wideCharLength];
-            MultiByteToWideChar(CP_936, 0, gbk.c_str(), (int)gbk.size(), wideChar, wideCharLength);
+            MultiByteToWideChar(CP_936, 0, gbk.c_str(), (int) gbk.size(), wideChar, wideCharLength);
             auto utf8Length = WideCharToMultiByte(CP_UTF8, 0, wideChar, wideCharLength, nullptr, 0, nullptr, nullptr);
             auto utf8 = new char[utf8Length];
             WideCharToMultiByte(CP_UTF8, 0, wideChar, wideCharLength, utf8, utf8Length, nullptr, nullptr);
@@ -343,11 +328,12 @@ namespace utils {
             delete[] utf8;
             return result;
         }
+
 #endif
     }
 
     namespace json {
-        inline ordered_json get_object(const nlohmann::ordered_json &json, const std::string &key) {
+        inline nlohmann::ordered_json get_object(const nlohmann::ordered_json &json, const std::string &key) {
             auto value = nlohmann::ordered_json();
             if (json.is_object() && json.contains(key)) {
                 value = json[key];
@@ -361,9 +347,6 @@ namespace utils {
             if (json.contains(key) && json[key].is_string()) {
                 value = json[key].get<std::string>();
             }
-#ifdef WINDOWS
-            value = strings::utf8_to_gbk(value);
-#endif
             return value;
         }
 
@@ -383,7 +366,7 @@ namespace utils {
             return value;
         }
 
-        inline ordered_json get_array(const nlohmann::ordered_json &json, const std::string &key) {
+        inline nlohmann::ordered_json get_array(const nlohmann::ordered_json &json, const std::string &key) {
             auto value = nlohmann::ordered_json::array();
             if (json.is_object() && json.contains(key) && json[key].is_array()) {
                 value = json[key];
@@ -397,11 +380,7 @@ namespace utils {
                 if (json[key].is_array()) {
                     for (auto it = json[key].begin(); it != json[key].end(); it++) {
                         if (it->is_string()) {
-#ifdef WINDOWS
-                            strings.emplace_back() = strings::utf8_to_gbk(it->get<std::string>());
-#else
                             array.emplace_back() = it->get<std::string>();
-#endif
                         }
                     }
                 } else if (json[key].is_string()) {
@@ -410,6 +389,42 @@ namespace utils {
             }
             return array;
         }
+
+        class trace_json : public nlohmann::ordered_json {
+        public:
+            trace_json() {
+                this->generate_dump();
+            }
+
+            trace_json(const basic_json &other) {
+                this->init(other);
+            }
+
+            trace_json &operator=(const nlohmann::ordered_json &ordered_json) {
+                this->init(ordered_json);
+                return *this;
+            }
+
+            void generate_dump() {
+#ifndef RELEASE
+#ifdef WINDOWS
+                this->m_dump = this->empty() ? "{}" : encoding::utf8_to_gbk(nlohmann::ordered_json::dump());
+#else
+                this->m_dump = this->empty() ? "{}" : nlohmann::ordered_json::dump();
+#endif
+#endif
+            }
+
+        protected:
+            void init(const nlohmann::ordered_json &other) {
+                nlohmann::ordered_json::operator=(other);
+                this->generate_dump();
+            }
+
+#ifndef RELEASE
+            std::string m_dump;
+#endif
+        };
     }
 
     namespace math {
@@ -423,6 +438,10 @@ namespace utils {
         inline int random() {
             return random(1, 10);
         }
+
+#ifdef max
+#undef max
+#endif
 
         inline int max(int a, int b) {
             return a > b ? a : b;
