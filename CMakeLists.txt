@@ -1,24 +1,32 @@
 cmake_minimum_required(VERSION 3.20)
 project(mud_fallout2)
 
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 14)
 
 if (MSVC)
     add_compile_options(/wd4819)
 endif ()
 
-include_directories("${CMAKE_SOURCE_DIR}/../vcpkg/packages/curl_x64-windows/include")
-include_directories("${CMAKE_SOURCE_DIR}/../vcpkg/packages/openssl_x64-windows/include")
+if (CMAKE_SYSTEM_NAME MATCHES "Windows")
+    include_directories("${CMAKE_SOURCE_DIR}/../vcpkg/packages/curl_x64-windows/include")
+    include_directories("${CMAKE_SOURCE_DIR}/../vcpkg/packages/openssl_x64-windows/include")
+else ()
+    include_directories("/usr/local/opt/openssl@3/include")
+endif ()
+
 include_directories("${CMAKE_SOURCE_DIR}/../tencentcloud-sdk-cpp/core/include")
 include_directories("${CMAKE_SOURCE_DIR}/../tencentcloud-sdk-cpp/tmt/include")
 include_directories("${CMAKE_SOURCE_DIR}/../cpp-httplib")
 include_directories("${CMAKE_SOURCE_DIR}/../json/single_include")
+include_directories("${CMAKE_SOURCE_DIR}/../json/single_include/nlohmann")
+include_directories("${CMAKE_SOURCE_DIR}/../websocketpp")
+include_directories("${CMAKE_SOURCE_DIR}/../boost_1_83_0")
 
 if (CMAKE_SYSTEM_NAME MATCHES "Windows")
     link_libraries(ws2_32)
     add_definitions(-DWINDOWS)
     add_definitions(-DWIN32_LEAN_AND_MEAN)
-else()
+else ()
     add_definitions(-DMAC)
 endif ()
 
@@ -27,12 +35,14 @@ if (NOT EXISTS "${CMAKE_SOURCE_DIR}/impl/userdef.hpp")
 endif ()
 
 add_executable(${PROJECT_NAME}
-        impl/stages.cpp
-        impl/character.cpp
-        impl/engine.cpp
         main.cpp
+        impl/stages.cpp
+        impl/unit.cpp
         impl/session.cpp
-        impl/session.h
+        impl/websocket.cpp
+        impl/maze.cpp
+        impl/maze.h
+        impl/struct.h
 )
 
 if (CMAKE_SYSTEM_NAME MATCHES "Windows")
@@ -52,4 +62,6 @@ if (CMAKE_SYSTEM_NAME MATCHES "Windows")
 else ()
     target_link_libraries(${PROJECT_NAME} "${CMAKE_SOURCE_DIR}/../tencentcloud-sdk-cpp/lib/libtencentcloud-sdk-cpp-core.dylib")
     target_link_libraries(${PROJECT_NAME} "${CMAKE_SOURCE_DIR}/../tencentcloud-sdk-cpp/lib/libtencentcloud-sdk-cpp-tmt.dylib")
+    target_link_libraries(${PROJECT_NAME} "/usr/local/opt/openssl@3/lib/libssl.a")
+    target_link_libraries(${PROJECT_NAME} "/usr/local/opt/openssl@3/lib/libcrypto.a")
 endif ()

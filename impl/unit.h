@@ -14,28 +14,18 @@
 #define MAX_LEVEL 999
 #define SAVE_DIRECTORY_NAME "Save"
 #define ROLE_PLAYER "player"
+#define ROLE_UNIT "unit"
+#define ROLE_MONSTER "monster"
 
-class character {
+class unit {
 public:
-    [[maybe_unused]] character();
+    [[maybe_unused]] unit();
 
-    [[maybe_unused]] character(const character *);
-
-    [[maybe_unused]] static character *create();
-
-    [[maybe_unused]] static character *create(const utils::json::trace_json &);
-
-    [[maybe_unused]] static character *create(const std::string &, const std::string &, const utils::json::trace_json &);
-
-    [[maybe_unused]] static character *load(const utils::json::trace_json &);
+    [[maybe_unused]] static unit *load(const nlohmann::ordered_json &);
 
     [[maybe_unused]] void save();
 
-    [[maybe_unused]] utils::json::trace_json execute(const std::string &);
-
-    [[maybe_unused]] utils::json::trace_json get_available_events();
-
-    [[maybe_unused]] std::vector<std::string> get_response_text();
+    [[maybe_unused]] bool execute(const std::string &);
 
     [[maybe_unused]] void add_health_point();
 
@@ -45,12 +35,15 @@ public:
 
     [[maybe_unused]] bool is_player() const;
 
-    [[maybe_unused]]void add_experience(int);
+    [[maybe_unused]] void add_experience(int);
+
+    [[maybe_unused]] std::vector<std::string> options();
 
     std::string name;
     std::string role;
     std::string password_hash;
     std::vector<std::string> flags;
+    STAGE_ACTION action;
     int level{};
     int health_point{};
     int max_health_point{};
@@ -61,17 +54,9 @@ public:
     int agility{};
     int health_point_recovery_rate{};
     int experience{};
-    utils::json::trace_json stage;
-    utils::json::trace_json events;
 
 protected:
     [[maybe_unused]] void init();
-
-    [[maybe_unused]] utils::json::trace_json get_available_events(const utils::json::trace_json &node);
-
-    [[maybe_unused]] utils::json::trace_json execute_event(const utils::json::trace_json &node, const std::string &name);
-
-    [[maybe_unused]] static utils::json::trace_json find_event(const utils::json::trace_json &node, const std::string &key);
 
     [[maybe_unused]] void add_flag(const std::string &);
 
@@ -79,7 +64,7 @@ protected:
 
     [[maybe_unused]] bool is_flag_exists(const std::string &);
 
-    [[maybe_unused]] bool is_usable(const std::string &, const nlohmann::ordered_json &);
+    [[maybe_unused]] bool is_valid_option(const std::string &name);
 };
 
 static class level_table {
@@ -87,7 +72,7 @@ public:
     level_table() {
         this->m_table.push_back(0);
         for (auto i = 1; i <= MAX_LEVEL; i++) {
-            this->m_table.push_back(this->m_table[i - 1] + (int)(i * 100 * 1.287653));
+            this->m_table.push_back(this->m_table[i - 1] + (int) (i * 100 * 1.287653));
         }
     }
 

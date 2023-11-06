@@ -1,6 +1,9 @@
-#include "impl/engine.h"
+#include "impl/websocket.h"
+#include "impl/keywords.h"
+#include "impl/maze.h"
 
 int main() {
-    mud_fallout2::engine::launch();
+    load_keywords();
+    listen();
     return 0;
 }

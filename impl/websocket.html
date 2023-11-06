@@ -1,0 +1,49 @@
+﻿<html lang="zh">
+<body>
+<label title="aaa">
+    <textarea id="textarea" readonly="readonly" style="width: 800px; height: 800px"></textarea>
+</label>
+<div>
+    <label title="aaa">
+        <input id="text" type="text"/>
+    </label>
+    <input type="button" value="GO" onclick="go()">
+</div>
+</body>
+<script>
+    top.wss = new WebSocket("ws://127.0.0.1:9002");
+    top.wss.onmessage = (event) => {
+        var textarea = document.getElementById("textarea");
+        var data = event.data;
+        if (data) {
+            var json = JSON.parse(data);
+            console.log(json);
+            if (json.statusCode === 200) {
+                if (json.text) {
+                    textarea.value += "----------------------------------------------------";
+                    textarea.value += json.text + "\n";
+                } else if (json.options) {
+                    textarea.value += "----------------------------------------------------";
+                    json.options.forEach((item) => {
+                        textarea.value += item + "\n";
+                    });
+                }
+            } else if (json.statusCode === 401) {
+                top.wss.send(JSON.stringify({
+                    userName: "1",
+                    password: "1"
+                }));
+            }
+        }
+    };
+    top.wss.onclose = () => {
+        console.log("wss: 与服务器的连接中断。");
+    }
+
+    function go() {
+        var elem = document.getElementById("text");
+        top.wss.send(JSON.stringify({option: elem.value}));
+        elem.value = "";
+    }
+</script>
+</html>

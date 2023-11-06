@@ -118,9 +118,8 @@ namespace utils {
     }
 }
 namespace utils {
-
-
     namespace console {
+        static std::mutex trace_mutex;
         inline std::string generate_colors_string() {
             std::string s;
             s += strings::format("\x1b[30m\\x1b[30m\x1b[0m\n");
@@ -159,15 +158,24 @@ namespace utils {
         }
 
         inline void trace(const std::string f, ...) {
+            trace_mutex.lock();
             VA_INIT(f, f);
             printf("[%s] %s\n", datetime::now().c_str(), s.c_str());
             fflush(stdout);
+            trace_mutex.unlock();
         }
 
         inline void critical(const std::string f, ...) {
             VA_INIT(f, f);
             printf("[%s] \x1b[31m%s\x1b[0m\n", datetime::now().c_str(), s.c_str());
             fflush(stdout);
+        }
+
+        inline void throw_(const std::string f, ...) {
+            VA_INIT(f, f);
+            printf("[%s] \x1b[31m%s\x1b[0m\n", datetime::now().c_str(), s.c_str());
+            fflush(stdout);
+            throw;
         }
 
         inline std::string yellow(const std::string &s) {
@@ -192,6 +200,24 @@ namespace utils {
     }
 
     namespace strings {
+        inline bool starts_with(const std::string& big, const std::string& small) {
+            if (&big == &small) return true;
+            const typename std::string::size_type big_size = big.size();
+            const typename std::string::size_type small_size = small.size();
+            const bool valid_ = (big_size >= small_size);
+            const bool starts_with_ = (big.compare(0, small_size, small) == 0);
+            return valid_ and starts_with_;
+        }
+
+        inline bool ends_with(const std::string& big, const std::string& small) {
+            if (&big == &small) return true;
+            const typename std::string::size_type big_size = big.size();
+            const typename std::string::size_type small_size = small.size();
+            const bool valid_ = (big_size >= small_size);
+            const bool ends_with_ = (big.compare(big_size - small_size, small_size, small) == 0);
+            return valid_ and ends_with_;
+        }
+
         inline std::string format(std::string f, ...) {
             VA_INIT(f, f);
             return s;
@@ -337,7 +363,6 @@ namespace utils {
             auto value = nlohmann::ordered_json();
             if (json.is_object() && json.contains(key)) {
                 value = json[key];
-                value.dump();
             }
             return value;
         }
@@ -378,9 +403,9 @@ namespace utils {
             auto array = std::vector<std::string>();
             if (json.is_object() && json.contains(key)) {
                 if (json[key].is_array()) {
-                    for (auto it = json[key].begin(); it != json[key].end(); it++) {
-                        if (it->is_string()) {
-                            array.emplace_back() = it->get<std::string>();
+                    for (const auto & it : json[key]) {
+                        if (it.is_string()) {
+                            array.emplace_back(it.get<std::string>());
                         }
                     }
                 } else if (json[key].is_string()) {
@@ -389,42 +414,6 @@ namespace utils {
             }
             return array;
         }
-
-        class trace_json : public nlohmann::ordered_json {
-        public:
-            trace_json() {
-                this->generate_dump();
-            }
-
-            trace_json(const basic_json &other) {
-                this->init(other);
-            }
-
-            trace_json &operator=(const nlohmann::ordered_json &ordered_json) {
-                this->init(ordered_json);
-                return *this;
-            }
-
-            void generate_dump() {
-#ifndef RELEASE
-#ifdef WINDOWS
-                this->m_dump = this->empty() ? "{}" : encoding::utf8_to_gbk(nlohmann::ordered_json::dump());
-#else
-                this->m_dump = this->empty() ? "{}" : nlohmann::ordered_json::dump();
-#endif
-#endif
-            }
-
-        protected:
-            void init(const nlohmann::ordered_json &other) {
-                nlohmann::ordered_json::operator=(other);
-                this->generate_dump();
-            }
-
-#ifndef RELEASE
-            std::string m_dump;
-#endif
-        };
     }
 
     namespace math {
@@ -464,14 +453,14 @@ namespace utils {
 
     namespace directory {
         inline bool is_exists(const std::string &path) {
-            auto p = std::filesystem::path(path);
-            return std::filesystem::exists(p) && std::filesystem::is_directory(p);
+            auto p = std::__fs::filesystem::path(path);
+            return std::__fs::filesystem::exists(p) && std::__fs::filesystem::is_directory(p);
         }
 
         inline std::vector<std::string> get_files(const std::string &path) {
             auto files = std::vector<std::string>();
             if (is_exists(path)) {
-                for (const auto &entry: std::filesystem::directory_iterator(std::filesystem::path(path))) {
+                for (const auto &entry: std::__fs::filesystem::directory_iterator(std::__fs::filesystem::path(path))) {
                     if (entry.is_regular_file()) {
                         files.emplace_back(entry.path().string());
                     }
@@ -483,7 +472,7 @@ namespace utils {
 
     namespace file {
         inline bool is_exists(const std::string &path) {
-            return std::filesystem::exists(std::filesystem::path(path));
+            return std::__fs::filesystem::exists(std::__fs::filesystem::path(path));
         }
 
         inline std::string load(const std::string &path) {

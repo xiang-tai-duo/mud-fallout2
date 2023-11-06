@@ -5,9 +5,11 @@
 #ifndef MUD_FALLOUT2_SESSION_H
 #define MUD_FALLOUT2_SESSION_H
 
-#include "character.h"
+#include "unit.h"
 #include <string>
 #include <mutex>
+#include <websocketpp/config/asio.hpp>
+#include <websocketpp/server.hpp>
 
 #ifndef SOCKET_ERROR
 #define SOCKET_ERROR (-1)
@@ -20,91 +22,89 @@
 
 #define MESSAGE_DELAY_MILLISECONDS              1000
 
-struct string_info {
-public:
-    bool translate;
-    int delay;
-    std::vector<std::string> format;
-
-    string_info();
-
-    string_info(const std::string &);
-
-    string_info(const std::vector<std::string> &);
-
-    string_info(bool, const std::string &);
-
-    string_info(int, const std::string &);
-
-    string_info(bool, int, const std::string &);
-
-    string_info(bool, int, const std::vector<std::string> &);
-
-    void init(bool, int, const std::string &);
-
-    void init(bool, int, const std::vector<std::string> &);
-};
+#define STATUS_CODE_OK                          200
+#define STATUS_CODE_UNAUTHORIZED                401
+#define STATUS_CODE_NOT_FOUND                   404
+#define STATUS_CODE_NOT_ACCEPT                  406
+#define JSON_KEY_TEXT                           "text"
+#define JSON_KEY_OPTION                         "option"
+#define JSON_KEY_OPTIONS                        "options"
+#define JSON_KEY_STATUS_CODE                    "statusCode"
+#define JSON_KEY_TEXT_TYPE                      "textType"
+#define TEXT_TYPE_NONE                          "none"
+#define TEXT_TYPE_EVENT                         "event"
+#define JSON_KEY_STATUS                         "status"
+#define JSON_KEY_NAME                           "name"
+#define JSON_KEY_LEVEL                          "level"
+#define JSON_KEY_HEALTH_POINT                   "health_point"
+#define JSON_KEY_MAX_HEALTH_POINT               "max_health_point"
+#define JSON_KEY_POWER                          "power"
+#define JSON_KEY_DEFENSIVE                      "defensive"
+#define JSON_KEY_AGILITY                        "agility"
+#define JSON_KEY_WEAPON                         "weapon"
+#define JSON_KEY_ARMOR                          "armor"
+#define JSON_KEY_EXPERIENCE                     "experience"
 
 class session {
 public:
-    explicit session(int);
+    session(websocketpp::server<websocketpp::config::asio> *, void *, const std::string &);
 
-    int socket;
-    int terminal_type;
-    std::string language;
-    character *player;
-    std::string socket_buffer;
+    ~session();
 
-    [[maybe_unused]] inline std::string read();
+    [[maybe_unused]] nlohmann::ordered_json read();
 
-    [[maybe_unused]] inline std::string read(int);
+    [[maybe_unused]] nlohmann::ordered_json read(int);
 
-    [[maybe_unused]] inline std::string read_line();
+    [[maybe_unused]] void push_message(const std::string &);
 
-    [[maybe_unused]] inline std::string read_line(int);
+    [[maybe_unused]] bool clear();
 
-    [[maybe_unused]] inline bool read_line(std::string &);
+    [[maybe_unused]] bool notify(const nlohmann::ordered_json &);
 
-    [[maybe_unused]] inline bool clear_socket_buffer();
+    [[maybe_unused]] bool notify(const std::string &, int);
 
-    [[maybe_unused]] [[nodiscard]] inline std::string replace_variable(const std::string &) const;
+    [[maybe_unused]] bool notify(const std::string &);
 
-    [[maybe_unused]] inline bool send_string(string_info, ...);
+    [[maybe_unused]] bool notify(const std::vector<std::string> &);
 
-    [[maybe_unused]] inline bool send_stage_description();
+    [[maybe_unused]] bool notify(const char *);
 
-    [[maybe_unused]] inline bool send_new_line();
+    [[maybe_unused]] bool notify_stage();
 
-    [[maybe_unused]] inline bool send_events();
+    [[maybe_unused]] bool notify_options();
 
-    [[maybe_unused]] inline bool raise_event(const std::string &);
+    [[maybe_unused]] bool execute_option(const std::string &event_index);
 
-    [[maybe_unused]] inline bool send_status(const std::string &);
+    [[maybe_unused]] bool rest(const std::string &);
 
-    [[maybe_unused]] inline bool send_rest(const std::string &);
+    [[maybe_unused]] bool encounter();
 
-    [[maybe_unused]] inline bool raise_encounter();
+    [[maybe_unused]] bool notify_messages();
 
-    [[maybe_unused]] inline bool send_response();
+    [[maybe_unused]] std::vector<unit *> random_monsters() const;
 
-    [[maybe_unused]] inline std::vector<character *> generate_random_monsters() const;
+    [[maybe_unused]] bool fight(std::vector<unit *> &, std::vector<unit *> &);
 
-    [[maybe_unused]] inline bool fight(std::vector<character *>, std::vector<character *>) const;
+    [[maybe_unused]] bool fight(std::vector<unit *> &);
 
-    [[maybe_unused]] inline bool fight(const std::vector<character *> &);
+    [[maybe_unused]] unit *get_player() { return this->player; }
 
-    [[maybe_unused]] static inline character *login(const std::string &, const std::string &);
-
-    [[maybe_unused]] static inline std::string highlight_keywords(const std::string &);
-
-    [[maybe_unused]] static inline std::string highlight_health_point(int, int);
-
-    [[maybe_unused]] static inline std::string highlight_health_point(const character *);
+    [[maybe_unused]] static unit *login(const std::string &, const std::string &, bool);
 
 protected:
     void main_loop();
 
-    std::mutex *socket_mutex;
+    websocketpp::server<websocketpp::config::asio> *websocketpp;
+    void *connection_hdl;
+    std::string language;
+    unit *player;
+    std::mutex messages_mutex;
+    std::mutex release_mutex;
+    std::vector<std::string> messages;
+    pthread_t main_thread;
+    bool is_shutdown;
+
+    [[maybe_unused]] void release();
 };
 
 
