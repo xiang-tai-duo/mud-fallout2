@@ -106,7 +106,10 @@ bool stage::is_keyword(const std::string &key) {
            key == PROPERTY_NAME_NECESSARY ||
            key == PROPERTY_NAME_DENIED ||
            key == PROPERTY_NAME_NEXT_ACTION ||
-           key == PROPERTY_NAME_ENCOUNTER ||
+           key == PROPERTY_NAME_MAZE ||
+           key == PROPERTY_NAME_WIDTH ||
+           key == PROPERTY_NAME_HEIGHT ||
+           key == PROPERTY_NAME_FLOORS ||
            key == PROPERTY_NAME_DURATION;
 }
 
@@ -115,8 +118,14 @@ STAGE_ACTION stage::init(const nlohmann::ordered_json &ordered_json) {
     action.name = utils::json::get_string(ordered_json, PROPERTY_NAME_NAME);
     action.stage_id = utils::json::get_string(ordered_json, PROPERTY_NAME_STAGE_ID);
     action.entrance = utils::json::get_boolean(ordered_json, PROPERTY_NAME_ENTRANCE);
-    action.encounter = utils::json::get_boolean(ordered_json, PROPERTY_NAME_ENCOUNTER);
-    action.duration = utils::json::get_boolean(ordered_json, PROPERTY_NAME_DURATION);
+    auto maze_json = utils::json::get_object(ordered_json, PROPERTY_NAME_MAZE);
+    if (!maze_json.empty()) {
+        action.maze.width = utils::json::get_integer(maze_json, PROPERTY_NAME_WIDTH);
+        action.maze.height = utils::json::get_integer(maze_json, PROPERTY_NAME_HEIGHT);
+        action.maze.floors = utils::json::get_integer(maze_json, PROPERTY_NAME_FLOORS);
+        action.maze.duration = utils::json::get_integer(maze_json, PROPERTY_NAME_DURATION);
+        action.maze.has_maze = true;
+    }
     action.messages = utils::json::get_strings(ordered_json, PROPERTY_NAME_MESSAGES);
     action.next_action = utils::json::get_string(ordered_json, PROPERTY_NAME_NEXT_ACTION);
     action.necessary = utils::json::get_strings(ordered_json, PROPERTY_NAME_NECESSARY);

@@ -22,8 +22,13 @@ struct STAGE_ACTION {
     bool is_root;
     std::string name;
     bool entrance;
-    bool encounter;
-    bool duration;
+    struct MAZE {
+        bool has_maze;
+        int width;
+        int height;
+        int floors;
+        int duration;
+    } maze;
     std::vector<std::string> messages;
     std::vector<class unit *> monsters;
     std::vector<std::string> options;

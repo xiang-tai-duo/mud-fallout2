@@ -1,7 +1,7 @@
 ﻿<html lang="zh">
-<body>
+<body style="background-color: #0c0c0c; color: white">
 <label title="aaa">
-    <textarea id="textarea" readonly="readonly" style="width: 800px; height: 800px"></textarea>
+    <textarea id="textarea" readonly="readonly" style="border-color: transparent; width: 800px; height: 800px; background-color: #0c0c0c; color: white"></textarea>
 </label>
 <div>
     <label title="aaa">
@@ -20,12 +20,22 @@
             console.log(json);
             if (json.statusCode === 200) {
                 if (json.text) {
-                    textarea.value += "----------------------------------------------------";
-                    textarea.value += json.text + "\n";
+                    if (textarea.value !== "") {
+                        textarea.value += "----------------------------------------------------\n";
+                    }
+                    if (Array.isArray(json.text)) {
+                        json.text.forEach((item, index) => {
+                            textarea.value += item + "\n";
+                        });
+                    } else {
+                        textarea.value += json.text + "\n";
+                    }
                 } else if (json.options) {
-                    textarea.value += "----------------------------------------------------";
-                    json.options.forEach((item) => {
-                        textarea.value += item + "\n";
+                    if (textarea.value !== "") {
+                        textarea.value += "----------------------------------------------------\n";
+                    }
+                    json.options.forEach((item, index) => {
+                        textarea.value += (index + 1) + ". " + item + "\n";
                     });
                 }
             } else if (json.statusCode === 401) {

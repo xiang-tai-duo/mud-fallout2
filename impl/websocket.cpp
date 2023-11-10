@@ -24,38 +24,44 @@ SESSION_INFO::~SESSION_INFO() {
     }
 }
 
+SESSION_INFO *find_session(void *connection) {
+    struct SESSION_INFO *session = nullptr;
+    sessions_mutex.lock();
+    if (sessions.find(connection) != sessions.end()) {
+        session = sessions[connection];
+    }
+    sessions_mutex.unlock();
+    return session;
+}
+
 // Define a callback to handle incoming messages
 void on_message(websocketpp::server<websocketpp::config::asio> *s,
                 const websocketpp::connection_hdl &hdl,
                 const websocketpp::server<websocketpp::config::asio>::message_ptr &msg) {
-    auto ptr = SHARED_PTR(hdl);
-    sessions_mutex.lock();
-    if (sessions.find(ptr) != sessions.end()) {
-        auto session = sessions[ptr];
-        if (session && session->engine) {
-            session->engine->push_message(msg->get_payload());
-        }
+    auto session = find_session(SHARED_PTR(hdl));
+    if (session && session->engine) {
+        session->engine->push_message(msg->get_payload());
     }
-    sessions_mutex.unlock();
 }
 
 void on_open(websocketpp::server<websocketpp::config::asio> *s, websocketpp::connection_hdl hdl) {
     auto ptr = SHARED_PTR(hdl);
-    sessions_mutex.lock();
     auto session_info = new SESSION_INFO();
     session_info->engine = new class session(s, ptr, "zh");
     session_info->connection = hdl;
+    sessions_mutex.lock();
     sessions[ptr] = session_info;
     sessions_mutex.unlock();
 }
 
 void close_session(void *hdl, const std::string &reason) {
-    sessions_mutex.lock();
-    if (sessions.find(hdl) != sessions.end()) {
-        delete sessions[hdl];
+    auto session = find_session(hdl);
+    if (session) {
+        sessions_mutex.lock();
         sessions.erase(hdl);
+        sessions_mutex.unlock();
+        delete session;
     }
-    sessions_mutex.unlock();
 }
 
 void close_session(void *hdl) {
@@ -69,13 +75,13 @@ void get_sessions(const std::function<void(std::map<void *, struct SESSION_INFO 
 }
 
 void on_close(websocketpp::server<websocketpp::config::asio> *s, const websocketpp::connection_hdl &hdl) {
-    auto ptr = SHARED_PTR(hdl);
-    sessions_mutex.lock();
-    if (sessions.find(ptr) != sessions.end()) {
-        delete sessions[ptr];
-        sessions.erase(ptr);
+    auto session = find_session(SHARED_PTR(hdl));
+    if (session) {
+        sessions_mutex.lock();
+        sessions.erase(SHARED_PTR(hdl));
+        sessions_mutex.unlock();
+        delete session;
     }
-    sessions_mutex.unlock();
 }
 
 void listen() {
@@ -86,6 +92,9 @@ void listen() {
 
         // Initialize Asio
         websocket.init_asio();
+
+        // Set reuse socket
+        websocket.set_reuse_addr(true);
 
         // Register our message handler
         websocket.set_message_handler(bind(&on_message, &websocket, ::_1, ::_2));
@@ -118,12 +127,10 @@ void listen() {
 }
 
 void send_session_data(void *hdl, const std::string &data) {
-    sessions_mutex.lock();
-    if (sessions.find(hdl) != sessions.end()) {
-        websocket.send(sessions[hdl]->connection, data, websocketpp::frame::opcode::value::TEXT);
+    auto session = find_session(hdl);
+    if (session) {
+        websocket.send(session->connection, data, websocketpp::frame::opcode::value::TEXT);
     }
-    sessions_mutex.unlock();
-
 }
 
 #pragma clang diagnostic pop

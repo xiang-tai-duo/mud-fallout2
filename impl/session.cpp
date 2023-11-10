@@ -14,31 +14,8 @@
 
 #pragma clang diagnostic push
 #pragma ide diagnostic ignored "ConstantConditionsOC"
-#ifdef WINDOWS
 
-#include "../../cpp-httplib/httplib.h"
-
-#else
-
-#include <sys/socket.h>
 #include <unistd.h>
-
-#include <utility>
-
-#define INFINITE (-1)
-
-#endif
-
-#define MAX_RECEIVE_BUFFER_SIZE                 1000
-#define POLLING_MILLISECONDS                    100
-#define ENCOUNTER_MILLISECONDS                  1000
-#define FIGHT_LOG_DISPLAY_DELAY_MILLISECONDS    300
-#define REST_DELAY_MILLISECONDS                 1000
-#define MOVE_DELAY_MILLISECONDS                 200
-#define STATUS_DELAY_MILLISECONDS               100
-#define MAX_ENCOUNTER_RAGE                      20
-#define MAX_ENCOUNTER_MONSTER                   6
-#define MACRO_PLAYER_NAME                       "{PLAYER_NAME}"
 
 session::session(websocketpp::server<websocketpp::config::asio> *websocketpp, void *hdl, const std::string &language) {
     this->websocketpp = websocketpp;
@@ -206,7 +183,7 @@ bool session::notify(const nlohmann::ordered_json &ordered_json) {
                 json[JSON_KEY_STATUS_CODE] = STATUS_CODE_OK;
             }
             if (!json.contains(JSON_KEY_TEXT_TYPE)) {
-                json[JSON_KEY_TEXT_TYPE] = TEXT_TYPE_NONE;
+                json[JSON_KEY_TEXT_TYPE] = TEXT_TYPE_TEXT;
             }
             if (this->player) {
                 auto status = nlohmann::ordered_json();
@@ -261,8 +238,10 @@ bool session::notify_stage() {
     auto stage = stage::singleton.stage_root(this->player->action.stage_id);
     auto events = nlohmann::ordered_json();
     events[JSON_KEY_TEXT] = nlohmann::ordered_json::array();
-    events[JSON_KEY_TEXT].push_back(stage.name);
-    events[JSON_KEY_TEXT].push_back(stage.messages);
+    events[JSON_KEY_TEXT].push_back(utils::strings::format("* %s", stage.name.c_str()));
+    for (auto &message: stage.messages) {
+        events[JSON_KEY_TEXT].push_back(utils::strings::format("  %s", message.c_str()));
+    }
     return this->notify(events);
 }
 
@@ -277,14 +256,73 @@ bool session::notify_messages() {
 bool session::notify_options() {
     auto b = true;
     if (this->player) {
-        auto options = this->player->options();
-        options.push_back(translate(MENU_ITEM_NAME_REST, this->language));
-
         auto ordered_json = nlohmann::ordered_json();
         ordered_json[JSON_KEY_OPTIONS] = nlohmann::ordered_json();
-        for (auto &o: options) {
+        for (auto &o: this->player->options()) {
             ordered_json[JSON_KEY_OPTIONS].push_back(o);
         }
+        ordered_json[JSON_KEY_OPTIONS].push_back(translate(MENU_ITEM_NAME_REST, this->language));
+        if (this->player->all_maze_maps.find(this->player->action.name) != this->player->all_maze_maps.end()) {
+            auto maps = nlohmann::ordered_json::array();
+            auto current_maze_maps = this->player->all_maze_maps[this->player->action.name];
+            for (auto &maze_map: *current_maze_maps) {
+                auto map = nlohmann::ordered_json();
+                map[JSON_KEY_ENTRANCE] = nlohmann::ordered_json();
+                map[JSON_KEY_ENTRANCE][JSON_KEY_X] = maze_map->entrance.first;
+                map[JSON_KEY_ENTRANCE][JSON_KEY_Y] = maze_map->entrance.second;
+                map[JSON_KEY_EXIT][JSON_KEY_X] = maze_map->exit.first;
+                map[JSON_KEY_EXIT][JSON_KEY_Y] = maze_map->exit.second;
+                auto coordinates = nlohmann::ordered_json::array();
+                for (auto &coordinate: maze_map->grid) {
+                    coordinates.push_back(coordinate);
+                }
+                map[JSON_KEY_MAP] = coordinates;
+                maps.push_back(map);
+            }
+            if (!current_maze_maps->empty() && this->player->action.name != this->player->maze_name) {
+                this->player->maze_position_x = (*current_maze_maps)[0]->entrance.first;
+                this->player->maze_position_y = (*current_maze_maps)[0]->entrance.second;
+                this->player->maze_map_index = 0;
+                this->player->maze_name = this->player->action.name;
+            }
+            ordered_json[JSON_KEY_MAZE][JSON_KEY_X] = this->player->maze_position_x;
+            ordered_json[JSON_KEY_MAZE][JSON_KEY_Y] = this->player->maze_position_y;
+            ordered_json[JSON_KEY_MAZE][JSON_KEY_INDEX] = this->player->maze_map_index;
+            ordered_json[JSON_KEY_MAZE][JSON_KEY_NAME] = this->player->maze_name;
+            ordered_json[JSON_KEY_MAZE][JSON_KEY_MAP] = maps;
+            if (this->player->maze_map_index < current_maze_maps->size()) {
+                auto maze_map = (*current_maze_maps)[this->player->maze_map_index];
+                auto mini_map_left = this->player->maze_position_x - MINI_MAP_RADIUS;
+                auto mini_map_right = this->player->maze_position_x + MINI_MAP_RADIUS;
+                auto mini_map_top = this->player->maze_position_y - MINI_MAP_RADIUS;
+                auto mini_map_bottom = this->player->maze_position_y + MINI_MAP_RADIUS;
+                if (mini_map_left < 0) { mini_map_left = 0; }
+                if (mini_map_right < 0) { mini_map_right = 0; }
+                if (mini_map_top < 0) { mini_map_top = 0; }
+                if (mini_map_bottom < 0) { mini_map_bottom = 0; }
+                if (mini_map_left >= maze_map->width()) { mini_map_left = maze_map->width() - 1; }
+                if (mini_map_right >= maze_map->width()) { mini_map_right = maze_map->width() - 1; }
+                if (mini_map_top >= maze_map->height()) { mini_map_top = maze_map->height() - 1; }
+                if (mini_map_bottom >= maze_map->height()) { mini_map_bottom = maze_map->height() - 1; }
+                auto map = std::vector<std::vector<CELL_TYPE >>(MINI_MAP_RADIUS * 2 + 1, std::vector<CELL_TYPE>(MINI_MAP_RADIUS * 2 + 1, CELL_TYPE::WALL));
+                auto offset_x = (MINI_MAP_RADIUS * 2 + 1 - (mini_map_right - mini_map_left)) / 2;
+                auto offset_y = (MINI_MAP_RADIUS * 2 + 1 - (mini_map_bottom - mini_map_top)) / 2;
+                auto mini_map_x = 0;
+                auto mini_map_y = 0;
+                for (auto y = mini_map_top + offset_y; y <= mini_map_bottom; y++, mini_map_y++) {
+                    for (auto x = mini_map_left + offset_x; x <= mini_map_right; x++, mini_map_x++) {
+                        map[mini_map_y][mini_map_x] = maze_map->grid[y][x];
+                    }
+                    mini_map_x = 0;
+                }
+                auto mini_map = nlohmann::ordered_json::array();
+                for (auto &coordinate: map) {
+                    mini_map.push_back(coordinate);
+                }
+                ordered_json[JSON_KEY_MAZE][JSON_KEY_MINI_MAP] = mini_map;
+            }
+        }
+        ordered_json[JSON_KEY_TEXT_TYPE] = TEXT_TYPE_OPTIONS;
         b = this->notify(ordered_json);
     }
     return b;
@@ -294,11 +332,11 @@ bool session::execute_option(const std::string &option) {
     auto b = false;
     if (this->player) {
         auto stage_id = this->player->action.stage_id;
-        if (this->player->execute(option)) {
+        if (this->player->execute(option) || this->move(option) || this->rest(option)) {
             if (stage_id != this->player->action.stage_id) {
                 this->notify_stage();
             }
-            if (this->encounter() && this->player->is_dead()) {
+            if (this->player->is_dead()) {
                 auto game_over = std::vector<std::string>();
                 game_over.emplace_back("你在一次战斗中不幸遇难，沙尘暴沙漠将你的残骸淹没。");
                 game_over.emplace_back("由于缺少水净化芯片来净化水源，阿罗由的人们决定在下一次辐射风暴之前撤离这个地方。");
@@ -308,7 +346,7 @@ bool session::execute_option(const std::string &option) {
             } else {
                 b = this->notify_messages();
             }
-        } else if (!this->rest(option)) {
+        } else {
             b = this->notify(utils::strings::format("错误！没有找到该命令：“%s”，可能该命令的执行程序已经在上一次大战中丢失", option.c_str()), STATUS_CODE_NOT_FOUND);
             utils::console::critical("Missing name: %s, stage: %s(%s)",
                                      option.c_str(),
@@ -318,6 +356,39 @@ bool session::execute_option(const std::string &option) {
     }
     if (b) {
         this->notify_options();
+    }
+    return b;
+}
+
+bool session::move(const std::string &option) {
+    auto b = false;
+    if (this->player && !this->player->maze_name.empty() &&
+        this->player->all_maze_maps.find(this->player->maze_name) != this->player->all_maze_maps.end()) {
+        auto maze_map = this->player->all_maze_maps[this->player->maze_name];
+        if (this->player->maze_map_index < maze_map->size()) {
+            auto map = (*maze_map)[this->player->maze_map_index];
+            if (option == MOVE_LEFT) {
+                if (map->cell_type(this->player->maze_position_x - 1, this->player->maze_position_y) == CELL_TYPE::PATH) {
+                    this->player->maze_position_x--;
+                }
+                b = true;
+            } else if (option == MOVE_RIGHT) {
+                if (map->cell_type(this->player->maze_position_x + 1, this->player->maze_position_y) == CELL_TYPE::PATH) {
+                    this->player->maze_position_x++;
+                }
+                b = true;
+            } else if (option == MOVE_UP) {
+                if (map->cell_type(this->player->maze_position_x, this->player->maze_position_y - 1) == CELL_TYPE::PATH) {
+                    this->player->maze_position_y--;
+                }
+                b = true;
+            } else if (option == MOVE_DOWN) {
+                if (map->cell_type(this->player->maze_position_x, this->player->maze_position_y + 1) == CELL_TYPE::PATH) {
+                    this->player->maze_position_y++;
+                }
+                b = true;
+            }
+        }
     }
     return b;
 }
@@ -340,16 +411,16 @@ bool session::rest(const std::string &option) {
     return b;
 }
 
-bool session::encounter() {
+bool session::encounter(int duration) {
     auto b = false;
-    if (this->player && this->player->action.encounter) {
+    if (this->player) {
         b = true;
         auto start_time = std::chrono::high_resolution_clock::now();
         while (b && !this->player->is_dead()) {
             auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start_time).count();
             auto progress = 100;
-            if (this->player->action.duration > 0) {
-                progress = milliseconds >= this->player->action.duration ? 100 : (int) (((double) milliseconds / (double) this->player->action.duration) * 100);
+            if (duration > 0) {
+                progress = milliseconds >= duration ? 100 : (int) (((double) milliseconds / (double) duration) * 100);
             }
             b = b && this->notify(utils::strings::format(
                     "%s... (%s%%)",

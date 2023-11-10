@@ -10,6 +10,7 @@
 #include <memory>
 #include "stages.h"
 #include "utils.hpp"
+#include "maze.h"
 
 #define MAX_LEVEL 999
 #define SAVE_DIRECTORY_NAME "Save"
@@ -44,6 +45,7 @@ public:
     std::string password_hash;
     std::vector<std::string> flags;
     STAGE_ACTION action;
+    std::map<std::string, std::vector<struct MAZE_MAP *> *> all_maze_maps;
     int level{};
     int health_point{};
     int max_health_point{};
@@ -54,6 +56,10 @@ public:
     int agility{};
     int health_point_recovery_rate{};
     int experience{};
+    int maze_position_x{};
+    int maze_position_y{};
+    int maze_map_index{};
+    std::string maze_name;
 
 protected:
     [[maybe_unused]] void init();

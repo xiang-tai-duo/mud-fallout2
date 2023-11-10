@@ -3,6 +3,10 @@
 //
 #include "unit.h"
 #include "macros.h"
+#include "maze.h"
+
+#define MIN_MAZE_WIDTH (10)
+#define MIN_MAZE_HEIGHT (10)
 
 unit::unit() {
     this->init();
@@ -117,6 +121,18 @@ bool unit::execute(const std::string &option_name) {
     auto a = stage::singleton.get(option_name);
     if (!a.name.empty()) {
         this->action = a;
+        if (this->action.maze.has_maze && this->action.maze.floors > 0 &&
+            this->all_maze_maps.find(this->action.name) == this->all_maze_maps.end()) {
+            auto maze = new std::vector<struct MAZE_MAP *>();
+            for (auto i = 0; i < this->action.maze.floors; i++) {
+                auto width = (int) (this->action.maze.width * utils::math::random(80, 120) / 100.0);
+                auto height = (int) (this->action.maze.height * utils::math::random(80, 120) / 100.0);
+                if (width < MIN_MAZE_WIDTH) { width = MIN_MAZE_WIDTH; }
+                if (height < MIN_MAZE_HEIGHT) { height = MIN_MAZE_HEIGHT; }
+                maze->push_back(generate_maze(width, height));
+            }
+            this->all_maze_maps[this->action.name] = maze;
+        }
         for (auto &got: this->action.got) {
             this->add_flag(got);
         }
