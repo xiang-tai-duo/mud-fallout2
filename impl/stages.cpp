@@ -20,6 +20,8 @@ stage::stage() {
                 ifstream.close();
                 std::vector<STAGE_ACTION> actions;
                 auto ordered_json = nlohmann::ordered_json::parse(content);
+
+                // json转为vector便于调试
                 this->compile(actions,
                               ordered_json,
                               true,
@@ -88,29 +90,14 @@ STAGE_ACTION stage::entrance() {
 }
 
 bool stage::is_keyword(const std::string &key) {
-    return key == PROPERTY_NAME_STAGE_ID ||
-           key == PROPERTY_NAME_NAME ||
-           key == PROPERTY_NAME_MONSTERS ||
-           key == PROPERTY_NAME_ENTRANCE ||
-           key == PROPERTY_NAME_NAME ||
-           key == PROPERTY_NAME_LEVEL ||
-           key == PROPERTY_NAME_HEALTH_POINT ||
-           key == PROPERTY_NAME_MAX_HEALTH_POINT ||
-           key == PROPERTY_NAME_POWER ||
-           key == PROPERTY_NAME_DEFENSIVE ||
-           key == PROPERTY_NAME_AGILITY ||
-           key == PROPERTY_NAME_EXPERIENCE ||
-           key == PROPERTY_NAME_MESSAGES ||
-           key == PROPERTY_NAME_GOT ||
-           key == PROPERTY_NAME_LOST ||
-           key == PROPERTY_NAME_NECESSARY ||
-           key == PROPERTY_NAME_DENIED ||
-           key == PROPERTY_NAME_NEXT_ACTION ||
-           key == PROPERTY_NAME_MAZE ||
-           key == PROPERTY_NAME_WIDTH ||
-           key == PROPERTY_NAME_HEIGHT ||
-           key == PROPERTY_NAME_FLOORS ||
-           key == PROPERTY_NAME_DURATION;
+    auto b = true;
+    for (auto &c: key) {
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'))) {
+            b = false;
+            break;
+        }
+    }
+    return b;
 }
 
 STAGE_ACTION stage::init(const nlohmann::ordered_json &ordered_json) {
@@ -128,7 +115,7 @@ STAGE_ACTION stage::init(const nlohmann::ordered_json &ordered_json) {
     }
     action.messages = utils::json::get_strings(ordered_json, PROPERTY_NAME_MESSAGES);
     action.next_action = utils::json::get_string(ordered_json, PROPERTY_NAME_NEXT_ACTION);
-    action.necessary = utils::json::get_strings(ordered_json, PROPERTY_NAME_NECESSARY);
+    action.must = utils::json::get_strings(ordered_json, PROPERTY_NAME_MUST);
     action.denied = utils::json::get_strings(ordered_json, PROPERTY_NAME_DENIED);
     action.got = utils::json::get_strings(ordered_json, PROPERTY_NAME_GOT);
     action.lost = utils::json::get_strings(ordered_json, PROPERTY_NAME_LOST);
@@ -149,17 +136,26 @@ STAGE_ACTION stage::init(const nlohmann::ordered_json &ordered_json) {
 }
 
 void stage::compile(std::vector<STAGE_ACTION> &actions, const nlohmann::ordered_json &ordered_json, bool is_root, const std::string &stage_id, const std::string &name) {
-    auto action = stage::init(ordered_json);
-    action.stage_id = stage_id;
-    action.is_root = is_root;
-    action.name = name;
-    for (auto child = ordered_json.begin(); child != ordered_json.end(); child++) {
-        if (!stage::is_keyword(child.key())) {
-            action.options.emplace_back(child.key());
-            stage::compile(actions, child.value(), false, stage_id, child.key());
-        }
-    }
+    // 要先判断该节点是否是空节点，如果是空节点说明这个节点引用了一个其他的节点，那么不要添加这个节点
     if (!ordered_json.empty()) {
+        auto action = stage::init(ordered_json);
+        action.stage_id = stage_id;
+        action.is_root = is_root;
+
+        // 这里要注意由于根节点是没有key的，所以外面会先读取根节点的name，作为key传进来
+        action.name = name;
+        for (auto child = ordered_json.begin(); child != ordered_json.end(); child++) {
+            if (child->is_object() && !stage::is_keyword(child.key())) {
+                action.options.emplace_back(child.key());
+            }
+        }
         actions.push_back(action);
+        for (auto child = ordered_json.begin(); child != ordered_json.end(); child++) {
+            if (child->is_object() && !stage::is_keyword(child.key())) {
+
+                // 将object的key作为name继续递归转换
+                stage::compile(actions, child.value(), false, stage_id, child.key());
+            }
+        }
     }
 }

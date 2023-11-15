@@ -18,7 +18,8 @@ enum CELL_TYPE : int {
     PATH = 0,                                       // 路径
     WALL = 1,                                       // 墙壁
     START = 2,                                      // 起点
-    END = 4                                         // 终点
+    END = 4,                                        // 终点
+    POSITION = 5                                    // 玩家所在位置
 };
 
 struct MAZE_MAP {
@@ -45,8 +46,14 @@ struct MAZE_MAP {
         }
     }
 
-    int width() { return this->_width; }            // 列数
-    int height() { return this->_height; }          // 行数
+    bool is_movable(int x, int y) {
+        auto cell_type = this->cell_type(x, y);
+        return cell_type == CELL_TYPE::PATH || cell_type == CELL_TYPE::START ||
+               cell_type == CELL_TYPE::END || cell_type == CELL_TYPE::POSITION;
+    }
+
+    int width() const { return this->_width; }            // 列数
+    int height() const { return this->_height; }          // 行数
 
     void set_width(int width) { this->_width = width; }
 

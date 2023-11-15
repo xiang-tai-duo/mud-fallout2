@@ -33,7 +33,7 @@ struct STAGE_ACTION {
     std::vector<class unit *> monsters;
     std::vector<std::string> options;
     std::string next_action;
-    std::vector<std::string> necessary;
+    std::vector<std::string> must;
     std::vector<std::string> denied;
     std::vector<std::string> got;
     std::vector<std::string> lost;

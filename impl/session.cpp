@@ -34,12 +34,12 @@ session::~session() {
 void session::main_loop() {
     pthread_create(&this->main_thread, nullptr, [](void *param) -> void * {
         if (param) {
-            auto session_ptr = reinterpret_cast<class session *>(param);
+            auto _this = reinterpret_cast<class session *>(param);
             auto user = std::string();
             auto password = std::string();
-            while (!session_ptr->is_shutdown && (user.empty() || password.empty())) {
-                session_ptr->notify(WELCOME_TEXT, STATUS_CODE_UNAUTHORIZED);
-                auto json = session_ptr->read();
+            while (!_this->is_shutdown && (user.empty() || password.empty())) {
+                _this->notify(WELCOME_TEXT, STATUS_CODE_UNAUTHORIZED);
+                auto json = _this->read();
                 user = utils::json::get_string(json, JSON_KEY_USER_NAME);
                 password = utils::json::get_string(json, JSON_KEY_PASSWORD);
             }
@@ -63,29 +63,29 @@ void session::main_loop() {
                     }
                 }
                 auto b = true;
-                session_ptr->player = p;
-                b = b && session_ptr->notify_stage();
-                b = b && session_ptr->notify_options();
+                _this->player = p;
+                b = b && _this->notify_stage();
+                b = b && _this->notify_options();
                 auto command = std::string();
-                while (!session_ptr->is_shutdown && b) {
-                    if (session_ptr->player->health_point <= session_ptr->player->max_health_point * 0.2) {
-                        b = b && session_ptr->notify("警告：当前生命值低于20%");
+                while (!_this->is_shutdown && b) {
+                    if (_this->player->health_point <= _this->player->max_health_point * 0.2) {
+                        b = b && _this->notify("警告：当前生命值低于20%");
                     }
-                    auto option = utils::json::get_string(session_ptr->read(), JSON_KEY_OPTION);
+                    auto option = utils::json::get_string(_this->read(), JSON_KEY_OPTION);
                     if (option.empty()) {
-                        session_ptr->notify("option is empty", STATUS_CODE_NOT_ACCEPT);
+                        _this->notify("option is empty", STATUS_CODE_NOT_ACCEPT);
                     } else {
-                        b = session_ptr->execute_option(option);
-                        session_ptr->player->save();
+                        b = _this->execute_option(option);
+                        _this->player->save();
                     }
                 }
             } else {
-                session_ptr->notify(WRONG_USER_NAME_TEXT);
+                _this->notify(WRONG_USER_NAME_TEXT);
                 pthread_t handle;
                 pthread_create(&handle, nullptr, [](void *param) -> void * {
                     close_session(param);
                     return nullptr;
-                }, session_ptr->connection_hdl);
+                }, _this->connection_hdl);
             }
         }
         return nullptr;
@@ -262,7 +262,11 @@ bool session::notify_options() {
             ordered_json[JSON_KEY_OPTIONS].push_back(o);
         }
         ordered_json[JSON_KEY_OPTIONS].push_back(translate(MENU_ITEM_NAME_REST, this->language));
+
+        // 地下城小地图绘制
         if (this->player->all_maze_maps.find(this->player->action.name) != this->player->all_maze_maps.end()) {
+
+            // 找出当前舞台使用的地图
             auto maps = nlohmann::ordered_json::array();
             auto current_maze_maps = this->player->all_maze_maps[this->player->action.name];
             for (auto &maze_map: *current_maze_maps) {
@@ -279,47 +283,106 @@ bool session::notify_options() {
                 map[JSON_KEY_MAP] = coordinates;
                 maps.push_back(map);
             }
+
+            // 如果用户上一个地下城地图和当前地下城地图名称不同，那么用户切换了地图，需要重置用户的坐标位置
             if (!current_maze_maps->empty() && this->player->action.name != this->player->maze_name) {
                 this->player->maze_position_x = (*current_maze_maps)[0]->entrance.first;
                 this->player->maze_position_y = (*current_maze_maps)[0]->entrance.second;
                 this->player->maze_map_index = 0;
                 this->player->maze_name = this->player->action.name;
             }
+
+            // 将用户的坐标信息发送到服务器
             ordered_json[JSON_KEY_MAZE][JSON_KEY_X] = this->player->maze_position_x;
             ordered_json[JSON_KEY_MAZE][JSON_KEY_Y] = this->player->maze_position_y;
             ordered_json[JSON_KEY_MAZE][JSON_KEY_INDEX] = this->player->maze_map_index;
             ordered_json[JSON_KEY_MAZE][JSON_KEY_NAME] = this->player->maze_name;
             ordered_json[JSON_KEY_MAZE][JSON_KEY_MAP] = maps;
+
+            // 从地下城地图中找出当前层的地图
             if (this->player->maze_map_index < current_maze_maps->size()) {
-                auto maze_map = (*current_maze_maps)[this->player->maze_map_index];
-                auto mini_map_left = this->player->maze_position_x - MINI_MAP_RADIUS;
-                auto mini_map_right = this->player->maze_position_x + MINI_MAP_RADIUS;
-                auto mini_map_top = this->player->maze_position_y - MINI_MAP_RADIUS;
-                auto mini_map_bottom = this->player->maze_position_y + MINI_MAP_RADIUS;
-                if (mini_map_left < 0) { mini_map_left = 0; }
-                if (mini_map_right < 0) { mini_map_right = 0; }
-                if (mini_map_top < 0) { mini_map_top = 0; }
-                if (mini_map_bottom < 0) { mini_map_bottom = 0; }
-                if (mini_map_left >= maze_map->width()) { mini_map_left = maze_map->width() - 1; }
-                if (mini_map_right >= maze_map->width()) { mini_map_right = maze_map->width() - 1; }
-                if (mini_map_top >= maze_map->height()) { mini_map_top = maze_map->height() - 1; }
-                if (mini_map_bottom >= maze_map->height()) { mini_map_bottom = maze_map->height() - 1; }
-                auto map = std::vector<std::vector<CELL_TYPE >>(MINI_MAP_RADIUS * 2 + 1, std::vector<CELL_TYPE>(MINI_MAP_RADIUS * 2 + 1, CELL_TYPE::WALL));
-                auto offset_x = (MINI_MAP_RADIUS * 2 + 1 - (mini_map_right - mini_map_left)) / 2;
-                auto offset_y = (MINI_MAP_RADIUS * 2 + 1 - (mini_map_bottom - mini_map_top)) / 2;
+
+                // 计算当前地图的可视范围，应该从大地图的哪个区域开始进行剪切
+                auto current_maze_map = (*current_maze_maps)[this->player->maze_map_index];
+                auto crop_left = this->player->maze_position_x - MINI_MAP_RADIUS;
+                auto crop_right = this->player->maze_position_x + MINI_MAP_RADIUS;
+                auto crop_top = this->player->maze_position_y - MINI_MAP_RADIUS;
+                auto crop_bottom = this->player->maze_position_y + MINI_MAP_RADIUS;
+
+                // 左边超出左边界，将左边超出边界的部分添补足右边
+                if (crop_left < 0) {
+                    crop_right += crop_left * -1;
+                    crop_left = 0;
+                }
+
+                // 如果右边超出左边界
+                if (crop_right < 0) {
+                    crop_right = 0;
+                }
+
+                // 如果上边超出上边界，那么将上边超出边界的部分添补足下边
+                if (crop_top < 0) {
+                    crop_bottom += crop_top * -1;
+                    crop_top = 0;
+                }
+
+                // 如果下边超出下边界
+                if (crop_bottom < 0) {
+                    crop_bottom = 0;
+                }
+
+                // 左边的右边界不能超过宽度
+                if (crop_left >= current_maze_map->width()) {
+                    crop_left = current_maze_map->width() - 1;
+                }
+
+                // 右边的右边界不能超过宽度，将右边超出边界的部分添补足左边
+                if (crop_right >= current_maze_map->width()) {
+                    crop_left += (current_maze_map->width() - 1) - crop_right;
+                    if (crop_left < 0) {
+                        crop_left = 0;
+                    }
+                    crop_right = current_maze_map->width() - 1;
+                }
+
+                // 上边的上边界不能超过高度
+                if (crop_top >= current_maze_map->height()) {
+                    crop_top = current_maze_map->height() - 1;
+                }
+
+                // 下边的下边界不能超过高度
+                if (crop_bottom >= current_maze_map->height()) {
+                    crop_top += (current_maze_map->height() - 1) - crop_bottom;
+                    if (crop_top < 0) {
+                        crop_top = 0;
+                    }
+                    crop_bottom = current_maze_map->height() - 1;
+                }
+
+                // 生成小地图，默认用墙填充小地图
+                auto mini_map = std::vector<std::vector<CELL_TYPE >>(MINI_MAP_RADIUS * 2 + 1, std::vector<CELL_TYPE>(MINI_MAP_RADIUS * 2 + 1, CELL_TYPE::WALL));
+
+                // 从mini_map_left/mini_map_top开始填充到小地图
                 auto mini_map_x = 0;
                 auto mini_map_y = 0;
-                for (auto y = mini_map_top + offset_y; y <= mini_map_bottom; y++, mini_map_y++) {
-                    for (auto x = mini_map_left + offset_x; x <= mini_map_right; x++, mini_map_x++) {
-                        map[mini_map_y][mini_map_x] = maze_map->grid[y][x];
+                for (auto y = crop_top; y <= crop_bottom; y++, mini_map_y++) {
+                    for (auto x = crop_left; x <= crop_right; x++, mini_map_x++) {
+                        mini_map[mini_map_y][mini_map_x] = current_maze_map->grid[y][x];
+
+                        // 如果坐标是当前用户的坐标，那么将这个点改为x
+                        if (x == this->player->maze_position_x && y == this->player->maze_position_y) {
+                            mini_map[mini_map_y][mini_map_x] = CELL_TYPE::POSITION;
+                        }
                     }
                     mini_map_x = 0;
                 }
-                auto mini_map = nlohmann::ordered_json::array();
-                for (auto &coordinate: map) {
-                    mini_map.push_back(coordinate);
+
+                // 将小地图转为json格式
+                auto mini_map_json = nlohmann::ordered_json::array();
+                for (auto &coordinate: mini_map) {
+                    mini_map_json.push_back(coordinate);
                 }
-                ordered_json[JSON_KEY_MAZE][JSON_KEY_MINI_MAP] = mini_map;
+                ordered_json[JSON_KEY_MAZE][JSON_KEY_MINI_MAP] = mini_map_json;
             }
         }
         ordered_json[JSON_KEY_TEXT_TYPE] = TEXT_TYPE_OPTIONS;
@@ -368,22 +431,22 @@ bool session::move(const std::string &option) {
         if (this->player->maze_map_index < maze_map->size()) {
             auto map = (*maze_map)[this->player->maze_map_index];
             if (option == MOVE_LEFT) {
-                if (map->cell_type(this->player->maze_position_x - 1, this->player->maze_position_y) == CELL_TYPE::PATH) {
+                if (map->is_movable(this->player->maze_position_x - 1, this->player->maze_position_y)) {
                     this->player->maze_position_x--;
                 }
                 b = true;
             } else if (option == MOVE_RIGHT) {
-                if (map->cell_type(this->player->maze_position_x + 1, this->player->maze_position_y) == CELL_TYPE::PATH) {
+                if (map->is_movable(this->player->maze_position_x + 1, this->player->maze_position_y)) {
                     this->player->maze_position_x++;
                 }
                 b = true;
             } else if (option == MOVE_UP) {
-                if (map->cell_type(this->player->maze_position_x, this->player->maze_position_y - 1) == CELL_TYPE::PATH) {
+                if (map->is_movable(this->player->maze_position_x, this->player->maze_position_y - 1)) {
                     this->player->maze_position_y--;
                 }
                 b = true;
             } else if (option == MOVE_DOWN) {
-                if (map->cell_type(this->player->maze_position_x, this->player->maze_position_y + 1) == CELL_TYPE::PATH) {
+                if (map->is_movable(this->player->maze_position_x, this->player->maze_position_y + 1)) {
                     this->player->maze_position_y++;
                 }
                 b = true;

@@ -98,7 +98,7 @@
 #define PROPERTY_NAME_MESSAGES                  "messages"
 #define PROPERTY_NAME_GOT                       "got"
 #define PROPERTY_NAME_LOST                      "lost"
-#define PROPERTY_NAME_NECESSARY                 "necessary"
+#define PROPERTY_NAME_MUST                      "must"
 #define PROPERTY_NAME_DENIED                    "denied"
 #define PROPERTY_NAME_NEXT_ACTION               "next_action"
 #define PROPERTY_NAME_DURATION                  "duration"

@@ -5,9 +5,6 @@
 #include "macros.h"
 #include "maze.h"
 
-#define MIN_MAZE_WIDTH (10)
-#define MIN_MAZE_HEIGHT (10)
-
 unit::unit() {
     this->init();
 }
@@ -175,11 +172,11 @@ bool unit::is_flag_exists(const std::string &flag) {
     return b;
 }
 
-bool unit::is_valid_option(const std::string &name) {
-    auto a = stage::singleton.get(name);
+bool unit::is_valid_option(const std::string &option) {
+    auto a = stage::singleton.get(option);
     auto b = true;
-    for (auto &necessary: a.necessary) {
-        if (!this->is_flag_exists(necessary)) {
+    for (auto &must: a.must) {
+        if (!this->is_flag_exists(must)) {
             b = false;
             break;
         }

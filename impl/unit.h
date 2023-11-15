@@ -70,7 +70,7 @@ protected:
 
     [[maybe_unused]] bool is_flag_exists(const std::string &);
 
-    [[maybe_unused]] bool is_valid_option(const std::string &name);
+    [[maybe_unused]] bool is_valid_option(const std::string &option);
 };
 
 static class level_table {

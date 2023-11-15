@@ -1,8 +1,33 @@
 ﻿<html lang="zh">
 <body style="background-color: #0c0c0c; color: white">
-<label title="aaa">
-    <textarea id="textarea" readonly="readonly" style="border-color: transparent; width: 800px; height: 800px; background-color: #0c0c0c; color: white"></textarea>
-</label>
+<div>
+    <label title="aaa">
+    <textarea id="textarea" readonly="readonly"
+              style="border-color: transparent; width: 800px; height: 800px; background-color: #0c0c0c; color: white"></textarea>
+    </label>
+    <label>
+        <textarea id="mini_map" readonly="readonly"
+                  style="position: fixed; width: 200px; height: 200px; background-color: #0c0c0c; color: white; line-height: 9px"></textarea>
+    </label>
+</div>
+
+<table>
+    <tr>
+        <td></td>
+        <td><input type="button" value="上" onclick="move_up()"></td>
+        <td></td>
+    </tr>
+    <tr>
+        <td><input type="button" value="左" onclick="move_left()"></td>
+        <td></td>
+        <td><input type="button" value="右" onclick="move_right()"></td>
+    </tr>
+    <tr>
+        <td></td>
+        <td><input type="button" value="下" onclick="move_down()"></td>
+        <td></td>
+    </tr>
+</table>
 <div>
     <label title="aaa">
         <input id="text" type="text"/>
@@ -34,6 +59,33 @@
                     if (textarea.value !== "") {
                         textarea.value += "----------------------------------------------------\n";
                     }
+                    document.getElementById("mini_map").value = "";
+                    if (json.maze && json.maze.mini_map) {
+                        json.maze.mini_map.forEach(row => {
+                            var s = "";
+                            row.forEach(c => {
+                                var b = c;
+                                switch (b) {
+                                    case 1:
+                                        b = '*';
+                                        break;
+                                    case 0:
+                                        b = ' ';
+                                        break;
+                                    case 5:
+                                        b = '@';
+                                        break;
+                                }
+                                s += b;
+                            });
+                            document.getElementById("mini_map").value += s + "\n";
+                        });
+                        document.getElementById("mini_map").value += "\n";
+                        document.getElementById("mini_map").value += "x: " + json.maze.x + ", y: " + json.maze.y + "\n";
+                    }
+                    json.options.forEach((item, index) => {
+                        textarea.value += (index + 1) + ". " + item + "\n";
+                    });
                     json.options.forEach((item, index) => {
                         textarea.value += (index + 1) + ". " + item + "\n";
                     });
@@ -50,10 +102,28 @@
         console.log("wss: 与服务器的连接中断。");
     }
 
+    document.getElementById("mini_map").style.left = document.getElementById("textarea").offsetWidth - document.getElementById("mini_map").offsetWidth + 8 + "px";
+
     function go() {
         var elem = document.getElementById("text");
         top.wss.send(JSON.stringify({option: elem.value}));
         elem.value = "";
+    }
+
+    function move_left() {
+        top.wss.send(JSON.stringify({option: "move_left"}));
+    }
+
+    function move_right() {
+        top.wss.send(JSON.stringify({option: "move_right"}));
+    }
+
+    function move_up() {
+        top.wss.send(JSON.stringify({option: "move_up"}));
+    }
+
+    function move_down() {
+        top.wss.send(JSON.stringify({option: "move_down"}));
     }
 </script>
 </html>
