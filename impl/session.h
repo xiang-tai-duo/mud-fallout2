@@ -17,37 +17,37 @@ public:
 
     ~session();
 
-    [[maybe_unused]] nlohmann::ordered_json read();
+    [[maybe_unused]] nlohmann::ordered_json read_client_json(int);
 
-    [[maybe_unused]] nlohmann::ordered_json read(int);
+    [[maybe_unused]] std::string read_client_option(int);
 
     [[maybe_unused]] void push_message(const std::string &);
 
-    [[maybe_unused]] bool clear();
+    [[maybe_unused]] bool reset_messages();
 
-    [[maybe_unused]] bool notify(const nlohmann::ordered_json &);
+    [[maybe_unused]] bool wss(const nlohmann::ordered_json &);
 
-    [[maybe_unused]] bool notify(const std::string &, int);
+    [[maybe_unused]] bool wss(const std::string &, int);
 
-    [[maybe_unused]] bool notify(const std::string &);
+    [[maybe_unused]] bool wss(const std::string &);
 
-    [[maybe_unused]] bool notify(const std::vector<std::string> &);
+    [[maybe_unused]] bool wss(const std::vector<std::string> &);
 
-    [[maybe_unused]] bool notify(const char *);
+    [[maybe_unused]] bool send_inline_text_to_client(const std::string &);
 
-    [[maybe_unused]] bool notify_stage();
+    [[maybe_unused]] bool send_stage_info_to_client();
 
-    [[maybe_unused]] bool notify_options();
+    [[maybe_unused]] bool send_options_to_client();
 
     [[maybe_unused]] bool execute_option(const std::string &event_index);
 
-    [[maybe_unused]] bool move(const std::string &);
-
     [[maybe_unused]] bool rest(const std::string &);
+
+    [[maybe_unused]] bool confirm_message(const std::string &);
 
     [[maybe_unused]] bool encounter(int);
 
-    [[maybe_unused]] bool notify_messages();
+    [[maybe_unused]] bool wss();
 
     [[maybe_unused]] std::vector<unit *> random_monsters() const;
 
@@ -55,9 +55,9 @@ public:
 
     [[maybe_unused]] bool fight(std::vector<unit *> &);
 
-    [[maybe_unused]] unit *get_player() { return this->player; }
+    [[maybe_unused]] bool login(const std::string &, const std::string &, bool);
 
-    [[maybe_unused]] static unit *login(const std::string &, const std::string &, bool);
+    [[maybe_unused]] unit *get_player() { return this->player; }
 
 protected:
     void main_loop();
@@ -69,7 +69,7 @@ protected:
     std::mutex messages_mutex;
     std::mutex release_mutex;
     std::vector<std::string> messages;
-    pthread_t main_thread;
+    std::thread *main_thread;
     bool is_shutdown;
 
     [[maybe_unused]] void release();

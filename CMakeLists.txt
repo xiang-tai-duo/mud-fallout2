@@ -1,16 +1,25 @@
 cmake_minimum_required(VERSION 3.20)
 project(mud_fallout2)
 
-set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD 17)
 
 if (MSVC)
     add_compile_options(/wd4819)
+    set(CURL_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../vcpkg/installed/x64-windows/share/curl)
+    set(OPENSSL_ROOT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../vcpkg/installed/x64-windows)
 endif ()
 
+find_package(OpenSSL REQUIRED)
+
 if (CMAKE_SYSTEM_NAME MATCHES "Windows")
+    add_definitions(-DWINDOWS)
+    add_definitions(-DNOMINMAX)
+    add_definitions(-DWIN32_LEAN_AND_MEAN)
     include_directories("${CMAKE_SOURCE_DIR}/../vcpkg/packages/curl_x64-windows/include")
     include_directories("${CMAKE_SOURCE_DIR}/../vcpkg/packages/openssl_x64-windows/include")
+    link_libraries(ws2_32)
 else ()
+    add_definitions(-DMAC)
     include_directories("/usr/local/opt/openssl@3/include")
 endif ()
 
@@ -22,16 +31,8 @@ include_directories("${CMAKE_SOURCE_DIR}/../json/single_include/nlohmann")
 include_directories("${CMAKE_SOURCE_DIR}/../websocketpp")
 include_directories("${CMAKE_SOURCE_DIR}/../boost_1_83_0")
 
-if (CMAKE_SYSTEM_NAME MATCHES "Windows")
-    link_libraries(ws2_32)
-    add_definitions(-DWINDOWS)
-    add_definitions(-DWIN32_LEAN_AND_MEAN)
-else ()
-    add_definitions(-DMAC)
-endif ()
-
 if (NOT EXISTS "${CMAKE_SOURCE_DIR}/impl/userdef.hpp")
-    file(WRITE "${CMAKE_SOURCE_DIR}/impl/userdef.hpp" "// TODO: Add your owner codes here\n")
+    file(WRITE "${CMAKE_SOURCE_DIR}/impl/userdef.hpp" "// TODO: Add your owner code here\n")
 endif ()
 
 add_executable(${PROJECT_NAME}
@@ -40,9 +41,6 @@ add_executable(${PROJECT_NAME}
         impl/unit.cpp
         impl/session.cpp
         impl/websocket.cpp
-        impl/maze.cpp
-        impl/maze.h
-        impl/struct.h
 )
 
 if (CMAKE_SYSTEM_NAME MATCHES "Windows")

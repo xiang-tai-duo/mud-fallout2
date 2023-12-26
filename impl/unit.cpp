@@ -3,7 +3,6 @@
 //
 #include "unit.h"
 #include "macros.h"
-#include "maze.h"
 
 unit::unit() {
     this->init();
@@ -12,16 +11,16 @@ unit::unit() {
 void unit::init() {
     this->name = utils::strings::random();
     this->role = ROLE_UNIT;
-    this->password_hash = utils::strings::random();
+    this->password_hash = std::string();
     this->level = 1;
-    this->health_point = 1;
+    this->health_point = 16;
     this->max_health_point = this->health_point;
     this->energy_point = 0;
-    this->power = 1;
+    this->power = 3;
     this->defensive = 1;
     this->agility = 1;
     this->health_point_recovery_rate = 1;
-    this->experience = 1;
+    this->experience = 0;
 }
 
 void unit::add_health_point(int value) {
@@ -57,7 +56,7 @@ unit *unit::load(const nlohmann::ordered_json &json) {
     p->name = utils::json::get_string(json, PROPERTY_NAME_NAME);
     p->role = utils::json::get_string(json, PROPERTY_NAME_ROLE);
     p->password_hash = utils::json::get_string(json, PROPERTY_NAME_PASSWORD_HASH);
-    p->flags = utils::json::get_array(json, PROPERTY_NAME_FLAGS);
+    p->items = utils::json::get_array(json, PROPERTY_NAME_ITEMS);
     p->level = utils::json::get_integer(json, PROPERTY_NAME_LEVEL);
     p->health_point = utils::json::get_integer(json, PROPERTY_NAME_HEALTH_POINT);
     p->max_health_point = utils::json::get_integer(json, PROPERTY_NAME_MAX_HEALTH_POINT);
@@ -67,22 +66,18 @@ unit *unit::load(const nlohmann::ordered_json &json) {
     p->defensive = utils::json::get_integer(json, PROPERTY_NAME_DEFENSIVE);
     p->agility = utils::json::get_integer(json, PROPERTY_NAME_AGILITY);
     p->experience = utils::json::get_integer(json, PROPERTY_NAME_EXPERIENCE);
-    p->action = stage::singleton.get(utils::json::get_string(json, PROPERTY_NAME_ACTION));
-    if (!p->execute(utils::json::get_string(json, PROPERTY_NAME_ACTION))) {
-        p->action = stage::singleton.entrance();
-    }
     return p;
 }
 
 void unit::save() {
     if (!this->password_hash.empty()) {
         auto json = nlohmann::ordered_json();
-        json[PROPERTY_NAME_NAME] = this->name;
-        json[PROPERTY_NAME_ROLE] = this->role;
-        json[PROPERTY_NAME_PASSWORD_HASH] = this->password_hash;
-        json[PROPERTY_NAME_FLAGS] = nlohmann::ordered_json::array();
-        for (auto &flag: this->flags) {
-            json[PROPERTY_NAME_FLAGS].push_back(flag);
+        json[PROPERTY_NAME_NAME] = UTF8(this->name);
+        json[PROPERTY_NAME_ROLE] = UTF8(this->role);
+        json[PROPERTY_NAME_PASSWORD_HASH] = UTF8(this->password_hash);
+        json[PROPERTY_NAME_ITEMS] = nlohmann::ordered_json::array();
+        for (auto &item: this->items) {
+            json[PROPERTY_NAME_ITEMS].push_back(UTF8(item));
         }
         json[PROPERTY_NAME_LEVEL] = this->level;
         json[PROPERTY_NAME_HEALTH_POINT] = this->health_point;
@@ -93,8 +88,8 @@ void unit::save() {
         json[PROPERTY_NAME_DEFENSIVE] = this->defensive;
         json[PROPERTY_NAME_AGILITY] = this->agility;
         json[PROPERTY_NAME_EXPERIENCE] = this->experience;
-        json[PROPERTY_NAME_ACTION] = this->action.name;
-        std::__fs::filesystem::create_directories(SAVE_DIRECTORY_NAME);
+        json[PROPERTY_NAME_CURRENT_STAGE_EVENT_NAME] = UTF8(this->current_stage_event.name);
+        std::filesystem::create_directories(SAVE_DIRECTORY_NAME);
         std::ofstream file(utils::strings::format("%s/%s.json", SAVE_DIRECTORY_NAME, this->name.c_str()));
         if (file.is_open()) {
             file << json.dump(2);
@@ -103,9 +98,9 @@ void unit::save() {
     }
 }
 
-std::vector<std::string> unit::options() {
+std::vector<std::string> unit::get_options() {
     auto o = std::vector<std::string>();
-    for (auto &option: this->action.options) {
+    for (auto &option: this->current_stage_event.options) {
         if (this->is_valid_option(option)) {
             o.emplace_back(option);
         }
@@ -113,57 +108,37 @@ std::vector<std::string> unit::options() {
     return o;
 }
 
-bool unit::execute(const std::string &option_name) {
-    auto b = false;
-    auto a = stage::singleton.get(option_name);
-    if (!a.name.empty()) {
-        this->action = a;
-        if (this->action.maze.has_maze && this->action.maze.floors > 0 &&
-            this->all_maze_maps.find(this->action.name) == this->all_maze_maps.end()) {
-            auto maze = new std::vector<struct MAZE_MAP *>();
-            for (auto i = 0; i < this->action.maze.floors; i++) {
-                auto width = (int) (this->action.maze.width * utils::math::random(80, 120) / 100.0);
-                auto height = (int) (this->action.maze.height * utils::math::random(80, 120) / 100.0);
-                if (width < MIN_MAZE_WIDTH) { width = MIN_MAZE_WIDTH; }
-                if (height < MIN_MAZE_HEIGHT) { height = MIN_MAZE_HEIGHT; }
-                maze->push_back(generate_maze(width, height));
-            }
-            this->all_maze_maps[this->action.name] = maze;
+void unit::add_item(const std::string &item_name) {
+    auto is_flag_item = utils::strings::starts_with(item_name, FLAG_PREFIX);
+    if (is_flag_item) {
+        if (!this->is_item_exists(item_name)) {
+            this->items.emplace_back(item_name);
         }
-        for (auto &got: this->action.got) {
-            this->add_flag(got);
-        }
-        for (auto &lost: this->action.lost) {
-            this->remove_flag(lost);
-        }
-        b = true;
-    }
-    return b;
-}
-
-void unit::add_flag(const std::string &flag) {
-    if (!this->is_flag_exists(flag)) {
-        this->flags.emplace_back(flag);
+    } else {
+        this->items.emplace_back(item_name);
     }
 }
 
-void unit::remove_flag(const std::string &flag) {
+void unit::delete_item(const std::string &item_name) {
     bool b;
+    auto is_flag_item = utils::strings::starts_with(item_name, FLAG_PREFIX);
     do {
         b = false;
-        for (auto it = this->flags.begin(); it != this->flags.end(); it++) {
-            if (*it == flag) {
-                this->flags.erase(it);
+        for (auto it = this->items.begin(); it != this->items.end(); it++) {
+            if (*it == item_name) {
+                this->items.erase(it);
                 b = true;
-                break;
+                if (!is_flag_item) {
+                    break;
+                }
             }
         }
     } while (b);
 }
 
-bool unit::is_flag_exists(const std::string &flag) {
+bool unit::is_item_exists(const std::string &flag) {
     auto b = false;
-    for (auto &e: this->flags) {
+    for (auto &e: this->items) {
         if (e == flag) {
             b = true;
             break;
@@ -173,18 +148,22 @@ bool unit::is_flag_exists(const std::string &flag) {
 }
 
 bool unit::is_valid_option(const std::string &option) {
-    auto a = stage::singleton.get(option);
-    auto b = true;
-    for (auto &must: a.must) {
-        if (!this->is_flag_exists(must)) {
-            b = false;
-            break;
+    auto a = stage::singleton.find_stage_event(option);
+    auto b = a.initialized;
+    if (b) {
+        for (auto &must: a.must) {
+            if (!this->is_item_exists(must)) {
+                b = false;
+                break;
+            }
         }
-    }
-    for (auto &denied: a.denied) {
-        if (this->is_flag_exists(denied)) {
-            b = false;
-            break;
+        if (b) {
+            for (auto &denied: a.denied) {
+                if (this->is_item_exists(denied)) {
+                    b = false;
+                    break;
+                }
+            }
         }
     }
     return b;

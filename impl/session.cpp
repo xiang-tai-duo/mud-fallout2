@@ -1,5 +1,5 @@
-ï»¿//
-// Created by é»„å…ƒé•­ on 2023/9/18.
+//
+// Created by »ÆÔªÀØ on 2023/9/18.
 //
 
 #include "session.h"
@@ -9,13 +9,15 @@
 #include "websocket.h"
 #include <iostream>
 #include <vector>
-#include <queue>
-#include <random>
 
+#ifdef MAC
 #pragma clang diagnostic push
 #pragma ide diagnostic ignored "ConstantConditionsOC"
+#endif
 
+#ifdef MAC
 #include <unistd.h>
+#endif
 
 session::session(websocketpp::server<websocketpp::config::asio> *websocketpp, void *hdl, const std::string &language) {
     this->websocketpp = websocketpp;
@@ -32,61 +34,56 @@ session::~session() {
 }
 
 void session::main_loop() {
-    pthread_create(&this->main_thread, nullptr, [](void *param) -> void * {
+    this->main_thread = new std::thread([](void *param) -> void * {
         if (param) {
             auto _this = reinterpret_cast<class session *>(param);
             auto user = std::string();
             auto password = std::string();
             while (!_this->is_shutdown && (user.empty() || password.empty())) {
-                _this->notify(WELCOME_TEXT, STATUS_CODE_UNAUTHORIZED);
-                auto json = _this->read();
+                _this->wss(translate(WELCOME_TEXT, _this->language), STATUS_CODE_UNAUTHORIZED);
+                auto json = _this->read_client_json(INFINITE);
                 user = utils::json::get_string(json, JSON_KEY_USER_NAME);
                 password = utils::json::get_string(json, JSON_KEY_PASSWORD);
             }
-            auto p = session::login(user, password, true);
-            if (p) {
-                std::vector<void *> connected_sessions;
-                get_sessions([&](std::map<void *, struct SESSION_INFO *> *sessions) -> void {
-                    for (auto &session: *sessions) {
-                        if (session.second->engine && session.second->engine->player && session.second->engine->player->name == user) {
-                            connected_sessions.push_back(session.first);
+            if (_this->login(user, password, true)) {
+                std::vector<void *> exists_sessions;
+
+                // ¼ì²âÊÇ·ñÒÑ¾­µÇÂ¼
+                enum_wss([&](std::map<void *, struct WSS *> *exists_wss) -> void {
+                    for (auto &wss: *exists_wss) {
+                        if (wss.second->session && wss.second->session->player &&
+                            wss.second->session->player->name == user &&
+                            !(_this->connection_hdl == wss.first && _this == wss.second->session)) {
+                            exists_sessions.push_back(wss.first);
                         }
                     }
                 });
-                if (!connected_sessions.empty()) {
-                    for (auto &session: connected_sessions) {
-                        pthread_t handle;
-                        pthread_create(&handle, nullptr, [](void *param) -> void * {
-                            close_session(param);
-                            return nullptr;
-                        }, session);
+                if (!exists_sessions.empty()) {
+                    for (auto &session: exists_sessions) {
+                        std::thread([](void *param) -> void {
+                            close_wss_client(param);
+                        }, session).detach();
                     }
                 }
                 auto b = true;
-                _this->player = p;
-                b = b && _this->notify_stage();
-                b = b && _this->notify_options();
-                auto command = std::string();
                 while (!_this->is_shutdown && b) {
                     if (_this->player->health_point <= _this->player->max_health_point * 0.2) {
-                        b = b && _this->notify("è­¦å‘Šï¼šå½“å‰ç”Ÿå‘½å€¼ä½äº20%");
+                        b = b && _this->wss(translate("¾¯¸æ£ºµ±Ç°ÉúÃüÖµµÍÓÚ20%", _this->language));
                     }
-                    auto option = utils::json::get_string(_this->read(), JSON_KEY_OPTION);
+                    auto option = utils::json::get_string(_this->read_client_json(INFINITE), JSON_KEY_OPTION);
                     if (option.empty()) {
-                        _this->notify("option is empty", STATUS_CODE_NOT_ACCEPT);
+                        _this->wss(translate("option is empty", _this->language), STATUS_CODE_NOT_ACCEPT);
                     } else {
                         b = _this->execute_option(option);
                         _this->player->save();
                     }
                 }
             } else {
-                _this->notify(WRONG_USER_NAME_TEXT);
-                pthread_t handle;
-                pthread_create(&handle, nullptr, [](void *param) -> void * {
-                    close_session(param);
-                    return nullptr;
-                }, _this->connection_hdl);
+                _this->wss(translate(WRONG_USER_NAME_TEXT, _this->language));
             }
+            std::thread([](void *param) -> void {
+                close_wss_client(param);
+            }, _this->connection_hdl).detach();
         }
         return nullptr;
     }, this);
@@ -95,18 +92,22 @@ void session::main_loop() {
 void session::release() {
     this->release_mutex.lock();
     this->is_shutdown = true;
-    pthread_join(this->main_thread, nullptr);
+    if (this->main_thread) {
+        this->main_thread->join();
+        delete this->main_thread;
+        this->main_thread = nullptr;
+    }
     this->release_mutex.unlock();
 }
 
-nlohmann::ordered_json session::read(int timeout) {
-    utils::console::trace(utils::strings::format("nlohmann::ordered_json session::read(%s)", timeout == INFINITE ? "INFINITE" : utils::strings::itoa(timeout).c_str()));
-    this->clear();
+nlohmann::ordered_json session::read_client_json(int timeout_milliseconds) {
     auto s = std::string();
-    auto start_time = std::chrono::high_resolution_clock::now();
+    auto start_time = NOW;
     auto is_timeout = false;
     auto ready = false;
+    this->reset_messages();
     while (!this->is_shutdown && !ready && !is_timeout) {
+        is_timeout = false;
         this->messages_mutex.lock();
         if (!this->messages.empty()) {
             s = this->messages[0];
@@ -116,65 +117,78 @@ nlohmann::ordered_json session::read(int timeout) {
         this->messages_mutex.unlock();
         if (ready) {
             break;
-        } else if (timeout != INFINITE) {
-            auto elapsed_milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start_time).count();
-            if (elapsed_milliseconds > timeout) {
-                is_timeout = true;
-            }
-            if (!is_timeout) {
-                utils::threading::sleep(POLLING_MILLISECONDS);
-            }
+        } else if (timeout_milliseconds != INFINITE) {
+            is_timeout = utils::datetime::duration(start_time) > timeout_milliseconds;
+        }
+        if (!is_timeout) {
+            utils::threading::sleep(POLLING_MILLISECONDS);
         }
     }
     return s.empty() ? nlohmann::ordered_json() : nlohmann::ordered_json::parse(s);
 }
 
-nlohmann::ordered_json session::read() {
-    return this->read(INFINITE);
+std::string session::read_client_option(int timeout_milliseconds) {
+    return utils::json::get_string(this->read_client_json(timeout_milliseconds), JSON_KEY_OPTION);
 }
 
 void session::push_message(const std::string &s) {
-    utils::console::trace(utils::strings::format("nlohmann::ordered_json session::push_message(%s)", s.c_str()));
     this->messages_mutex.lock();
     this->messages.push_back(s);
     this->messages_mutex.unlock();
 }
 
-bool session::clear() {
+bool session::reset_messages() {
     this->messages_mutex.lock();
     this->messages.clear();
     this->messages_mutex.unlock();
     return true;
 }
 
-unit *session::login(const std::string &user_name, const std::string &password, bool generate_new) {
-    auto p = (unit *)
-            nullptr;
+bool session::login(const std::string &user_name, const std::string &password, bool generate_new) {
     auto password_hash = utils::hash::sha1(password);
     std::ifstream save_file(utils::strings::format("%s/%s.json", SAVE_DIRECTORY_NAME, user_name.c_str()));
     if (save_file.is_open()) {
         std::ostringstream ss;
         ss << save_file.rdbuf();
         save_file.close();
-        try {
-            auto character = unit::load(nlohmann::ordered_json::parse(ss.str()));
+        auto content = ss.str();
+        if (content.empty()) {
+            generate_new = true;
+        } else {
+            auto json = nlohmann::ordered_json::parse(ss.str());
+            auto character = unit::load(json);
             if (character->password_hash == password_hash) {
-                p = character;
+                this->player = character;
+                this->player->current_stage_event = stage::singleton.find_stage_event(utils::json::get_string(json, PROPERTY_NAME_CURRENT_STAGE_EVENT_NAME));
+                if (this->player->current_stage_event.initialized) {
+
+                    // Èç¹û³¡¾°ÊÇµØÏÂ³ÇµÄ»°£¬ÏÂÒ»´ÎµÇÂ¼Ó¦¸ÃÒªÔÚ³¡¾°µÄÈë¿Ú
+                    if (this->player->current_stage_event.maze.initialized) {
+                        this->player->current_stage_event = stage::singleton.find_stage_entrance_event(this->player->current_stage_event.stage_id);
+                    }
+                } else {
+                    this->player->current_stage_event = stage::singleton.entrance();
+                }
+                this->send_stage_info_to_client();
+
+                // Èç¹ûÍæ¼ÒÉúÃüÖµÎª0£¬ÄÇÃ´°ÑÉúÃüÖµ¸ÄÎª1
+                this->player->health_point = utils::math::max(this->player->health_point, 1);
+                this->execute_option(this->player->current_stage_event.name);
             }
-        } catch (std::exception &ex) {
-            utils::console::critical(ex.what());
         }
-    } else if (generate_new) {
-        p = new unit();
-        p->name = user_name;
-        p->password_hash = password_hash;
-        p->action = stage::singleton.entrance();
-        p->save();
     }
-    return p;
+    if (generate_new) {
+        this->player = new unit();
+        this->player->name = user_name;
+        this->player->role = ROLE_PLAYER;
+        this->player->password_hash = password_hash;
+        this->player->current_stage_event = stage::singleton.entrance();
+        this->player->save();
+    }
+    return this->player != nullptr;
 }
 
-bool session::notify(const nlohmann::ordered_json &ordered_json) {
+bool session::wss(const nlohmann::ordered_json &ordered_json) {
     auto b = false;
     if (this->websocketpp) {
         try {
@@ -183,23 +197,29 @@ bool session::notify(const nlohmann::ordered_json &ordered_json) {
                 json[JSON_KEY_STATUS_CODE] = STATUS_CODE_OK;
             }
             if (!json.contains(JSON_KEY_TEXT_TYPE)) {
-                json[JSON_KEY_TEXT_TYPE] = TEXT_TYPE_TEXT;
+                json[JSON_KEY_TEXT_TYPE] = UTF8(TEXT_TYPE_TEXT);
             }
             if (this->player) {
                 auto status = nlohmann::ordered_json();
-                status[JSON_KEY_NAME] = this->player->name;
+                status[JSON_KEY_NAME] = UTF8(this->player->name);
                 status[JSON_KEY_LEVEL] = this->player->level;
                 status[JSON_KEY_HEALTH_POINT] = this->player->health_point;
                 status[JSON_KEY_MAX_HEALTH_POINT] = this->player->max_health_point;
                 status[JSON_KEY_POWER] = this->player->power;
                 status[JSON_KEY_DEFENSIVE] = this->player->defensive;
                 status[JSON_KEY_AGILITY] = this->player->agility;
-                status[JSON_KEY_WEAPON] = "ç©ºæ‰‹";
-                status[JSON_KEY_ARMOR] = "é¿éš¾æ‰€é˜²æŠ¤æœ";
+                status[JSON_KEY_WEAPON] = i18n("¿ÕÊÖ");
+                status[JSON_KEY_ARMOR] = i18n("±ÜÄÑËù·À»¤·ş");
                 status[JSON_KEY_EXPERIENCE] = this->player->experience;
                 json[JSON_KEY_STATUS] = status;
             }
-            send_session_data(this->connection_hdl, json.dump(2));
+#if 0
+            utils::console::trace(utils::strings::remove_escape_characters(GBK(json.dump(2))));
+#endif
+            // Ã¿´Î·¢ËÍÏûÏ¢Ö®Ç°ĞèÒªÑÓÊ±£¬µ«ÊÇÈç¹ûÕâĞĞ´úÂë·ÅÔÚsend_wss_dataºóÃæµÄ»°
+            // »òÔì³Éwss×èÈû£¬ËùÒÔÒªÔÚsend_wss_dataÖ®Ç°½øĞĞÑÓÊ±²Ù×÷
+            utils::threading::sleep(WEBSOCKET_DELAY_MILLISECONDS);
+            send_wss_data(this->connection_hdl, json.dump(2));
             b = true;
         } catch (websocketpp::exception const &e) {
             std::cout << "Echo failed because: "
@@ -210,249 +230,156 @@ bool session::notify(const nlohmann::ordered_json &ordered_json) {
     return b;
 }
 
-bool session::notify(const std::string &text, int status_code) {
+bool session::wss(const std::string &utf8, int status_code) {
     auto ordered_json = nlohmann::ordered_json();
-    ordered_json[JSON_KEY_TEXT] = text;
+    ordered_json[JSON_KEY_TEXT] = utf8;
     ordered_json[JSON_KEY_STATUS_CODE] = status_code;
-    return this->notify(ordered_json);
+    return this->wss(ordered_json);
 }
 
-bool session::notify(const std::string &text) {
-    return this->notify(text, STATUS_CODE_OK);
+bool session::wss(const std::string &utf8) {
+    return this->wss(utf8, STATUS_CODE_OK);
 }
 
-bool session::notify(const std::vector<std::string> &text) {
+bool session::wss(const std::vector<std::string> &utf8) {
     auto ordered_json = nlohmann::ordered_json();
-    ordered_json[JSON_KEY_TEXT] = nlohmann::ordered_json();
-    for (auto &e: text) {
-        ordered_json[JSON_KEY_TEXT].push_back(e);
+    ordered_json[JSON_KEY_TEXT] = nlohmann::ordered_json::array();
+    for (auto &o: utf8) {
+        ordered_json[JSON_KEY_TEXT].push_back(o);
     }
-    return this->notify(ordered_json);
+    return this->wss(ordered_json);
 }
 
-bool session::notify(const char *text) {
-    return this->notify(std::string(text));
+bool session::send_inline_text_to_client(const std::string &utf8) {
+    auto ordered_json = nlohmann::ordered_json();
+    ordered_json[JSON_KEY_TEXT] = utf8;
+    ordered_json[JSON_KEY_TEXT_TYPE] = TEXT_TYPE_INLINE_TEXT;
+    return this->wss(ordered_json);
 }
 
-bool session::notify_stage() {
-    auto stage = stage::singleton.stage_root(this->player->action.stage_id);
-    auto events = nlohmann::ordered_json();
-    events[JSON_KEY_TEXT] = nlohmann::ordered_json::array();
-    events[JSON_KEY_TEXT].push_back(utils::strings::format("* %s", stage.name.c_str()));
-    for (auto &message: stage.messages) {
-        events[JSON_KEY_TEXT].push_back(utils::strings::format("  %s", message.c_str()));
-    }
-    return this->notify(events);
-}
-
-bool session::notify_messages() {
+bool session::send_stage_info_to_client() {
     auto b = true;
-    if (this->player) {
-        b = this->notify(this->player->action.messages);
+    if (this->player->current_stage_event.initialized) {
+        auto stage = stage::singleton.find_stage_entrance_event(this->player->current_stage_event.stage_id);
+        auto ordered_json = nlohmann::ordered_json();
+        ordered_json[JSON_KEY_TEXT] = nlohmann::ordered_json::array();
+        ordered_json[JSON_KEY_TEXT].emplace_back(i18n(utils::strings::format("* %s", stage.name.c_str())));
+        for (auto &message: stage.messages) {
+            ordered_json[JSON_KEY_TEXT].emplace_back(i18n(utils::strings::format("  %s", message.c_str())));
+        }
+        b = this->wss(ordered_json);
     }
     return b;
 }
 
-bool session::notify_options() {
+bool session::wss() {
     auto b = true;
     if (this->player) {
         auto ordered_json = nlohmann::ordered_json();
-        ordered_json[JSON_KEY_OPTIONS] = nlohmann::ordered_json();
-        for (auto &o: this->player->options()) {
-            ordered_json[JSON_KEY_OPTIONS].push_back(o);
+        ordered_json[JSON_KEY_TEXT] = nlohmann::ordered_json();
+        for (auto &e: this->player->current_stage_event.messages) {
+            ordered_json[JSON_KEY_TEXT].push_back(i18n(e));
         }
-        ordered_json[JSON_KEY_OPTIONS].push_back(translate(MENU_ITEM_NAME_REST, this->language));
-
-        // åœ°ä¸‹åŸå°åœ°å›¾ç»˜åˆ¶
-        if (this->player->all_maze_maps.find(this->player->action.name) != this->player->all_maze_maps.end()) {
-
-            // æ‰¾å‡ºå½“å‰èˆå°ä½¿ç”¨çš„åœ°å›¾
-            auto maps = nlohmann::ordered_json::array();
-            auto current_maze_maps = this->player->all_maze_maps[this->player->action.name];
-            for (auto &maze_map: *current_maze_maps) {
-                auto map = nlohmann::ordered_json();
-                map[JSON_KEY_ENTRANCE] = nlohmann::ordered_json();
-                map[JSON_KEY_ENTRANCE][JSON_KEY_X] = maze_map->entrance.first;
-                map[JSON_KEY_ENTRANCE][JSON_KEY_Y] = maze_map->entrance.second;
-                map[JSON_KEY_EXIT][JSON_KEY_X] = maze_map->exit.first;
-                map[JSON_KEY_EXIT][JSON_KEY_Y] = maze_map->exit.second;
-                auto coordinates = nlohmann::ordered_json::array();
-                for (auto &coordinate: maze_map->grid) {
-                    coordinates.push_back(coordinate);
-                }
-                map[JSON_KEY_MAP] = coordinates;
-                maps.push_back(map);
-            }
-
-            // å¦‚æœç”¨æˆ·ä¸Šä¸€ä¸ªåœ°ä¸‹åŸåœ°å›¾å’Œå½“å‰åœ°ä¸‹åŸåœ°å›¾åç§°ä¸åŒï¼Œé‚£ä¹ˆç”¨æˆ·åˆ‡æ¢äº†åœ°å›¾ï¼Œéœ€è¦é‡ç½®ç”¨æˆ·çš„åæ ‡ä½ç½®
-            if (!current_maze_maps->empty() && this->player->action.name != this->player->maze_name) {
-                this->player->maze_position_x = (*current_maze_maps)[0]->entrance.first;
-                this->player->maze_position_y = (*current_maze_maps)[0]->entrance.second;
-                this->player->maze_map_index = 0;
-                this->player->maze_name = this->player->action.name;
-            }
-
-            // å°†ç”¨æˆ·çš„åæ ‡ä¿¡æ¯å‘é€åˆ°æœåŠ¡å™¨
-            ordered_json[JSON_KEY_MAZE][JSON_KEY_X] = this->player->maze_position_x;
-            ordered_json[JSON_KEY_MAZE][JSON_KEY_Y] = this->player->maze_position_y;
-            ordered_json[JSON_KEY_MAZE][JSON_KEY_INDEX] = this->player->maze_map_index;
-            ordered_json[JSON_KEY_MAZE][JSON_KEY_NAME] = this->player->maze_name;
-            ordered_json[JSON_KEY_MAZE][JSON_KEY_MAP] = maps;
-
-            // ä»åœ°ä¸‹åŸåœ°å›¾ä¸­æ‰¾å‡ºå½“å‰å±‚çš„åœ°å›¾
-            if (this->player->maze_map_index < current_maze_maps->size()) {
-
-                // è®¡ç®—å½“å‰åœ°å›¾çš„å¯è§†èŒƒå›´ï¼Œåº”è¯¥ä»å¤§åœ°å›¾çš„å“ªä¸ªåŒºåŸŸå¼€å§‹è¿›è¡Œå‰ªåˆ‡
-                auto current_maze_map = (*current_maze_maps)[this->player->maze_map_index];
-                auto crop_left = this->player->maze_position_x - MINI_MAP_RADIUS;
-                auto crop_right = this->player->maze_position_x + MINI_MAP_RADIUS;
-                auto crop_top = this->player->maze_position_y - MINI_MAP_RADIUS;
-                auto crop_bottom = this->player->maze_position_y + MINI_MAP_RADIUS;
-
-                // å·¦è¾¹è¶…å‡ºå·¦è¾¹ç•Œï¼Œå°†å·¦è¾¹è¶…å‡ºè¾¹ç•Œçš„éƒ¨åˆ†æ·»è¡¥è¶³å³è¾¹
-                if (crop_left < 0) {
-                    crop_right += crop_left * -1;
-                    crop_left = 0;
-                }
-
-                // å¦‚æœå³è¾¹è¶…å‡ºå·¦è¾¹ç•Œ
-                if (crop_right < 0) {
-                    crop_right = 0;
-                }
-
-                // å¦‚æœä¸Šè¾¹è¶…å‡ºä¸Šè¾¹ç•Œï¼Œé‚£ä¹ˆå°†ä¸Šè¾¹è¶…å‡ºè¾¹ç•Œçš„éƒ¨åˆ†æ·»è¡¥è¶³ä¸‹è¾¹
-                if (crop_top < 0) {
-                    crop_bottom += crop_top * -1;
-                    crop_top = 0;
-                }
-
-                // å¦‚æœä¸‹è¾¹è¶…å‡ºä¸‹è¾¹ç•Œ
-                if (crop_bottom < 0) {
-                    crop_bottom = 0;
-                }
-
-                // å·¦è¾¹çš„å³è¾¹ç•Œä¸èƒ½è¶…è¿‡å®½åº¦
-                if (crop_left >= current_maze_map->width()) {
-                    crop_left = current_maze_map->width() - 1;
-                }
-
-                // å³è¾¹çš„å³è¾¹ç•Œä¸èƒ½è¶…è¿‡å®½åº¦ï¼Œå°†å³è¾¹è¶…å‡ºè¾¹ç•Œçš„éƒ¨åˆ†æ·»è¡¥è¶³å·¦è¾¹
-                if (crop_right >= current_maze_map->width()) {
-                    crop_left += (current_maze_map->width() - 1) - crop_right;
-                    if (crop_left < 0) {
-                        crop_left = 0;
-                    }
-                    crop_right = current_maze_map->width() - 1;
-                }
-
-                // ä¸Šè¾¹çš„ä¸Šè¾¹ç•Œä¸èƒ½è¶…è¿‡é«˜åº¦
-                if (crop_top >= current_maze_map->height()) {
-                    crop_top = current_maze_map->height() - 1;
-                }
-
-                // ä¸‹è¾¹çš„ä¸‹è¾¹ç•Œä¸èƒ½è¶…è¿‡é«˜åº¦
-                if (crop_bottom >= current_maze_map->height()) {
-                    crop_top += (current_maze_map->height() - 1) - crop_bottom;
-                    if (crop_top < 0) {
-                        crop_top = 0;
-                    }
-                    crop_bottom = current_maze_map->height() - 1;
-                }
-
-                // ç”Ÿæˆå°åœ°å›¾ï¼Œé»˜è®¤ç”¨å¢™å¡«å……å°åœ°å›¾
-                auto mini_map = std::vector<std::vector<CELL_TYPE >>(MINI_MAP_RADIUS * 2 + 1, std::vector<CELL_TYPE>(MINI_MAP_RADIUS * 2 + 1, CELL_TYPE::WALL));
-
-                // ä»mini_map_left/mini_map_topå¼€å§‹å¡«å……åˆ°å°åœ°å›¾
-                auto mini_map_x = 0;
-                auto mini_map_y = 0;
-                for (auto y = crop_top; y <= crop_bottom; y++, mini_map_y++) {
-                    for (auto x = crop_left; x <= crop_right; x++, mini_map_x++) {
-                        mini_map[mini_map_y][mini_map_x] = current_maze_map->grid[y][x];
-
-                        // å¦‚æœåæ ‡æ˜¯å½“å‰ç”¨æˆ·çš„åæ ‡ï¼Œé‚£ä¹ˆå°†è¿™ä¸ªç‚¹æ”¹ä¸ºx
-                        if (x == this->player->maze_position_x && y == this->player->maze_position_y) {
-                            mini_map[mini_map_y][mini_map_x] = CELL_TYPE::POSITION;
-                        }
-                    }
-                    mini_map_x = 0;
-                }
-
-                // å°†å°åœ°å›¾è½¬ä¸ºjsonæ ¼å¼
-                auto mini_map_json = nlohmann::ordered_json::array();
-                for (auto &coordinate: mini_map) {
-                    mini_map_json.push_back(coordinate);
-                }
-                ordered_json[JSON_KEY_MAZE][JSON_KEY_MINI_MAP] = mini_map_json;
-            }
-        }
-        ordered_json[JSON_KEY_TEXT_TYPE] = TEXT_TYPE_OPTIONS;
-        b = this->notify(ordered_json);
+        b = this->wss(ordered_json);
     }
     return b;
 }
 
-bool session::execute_option(const std::string &option) {
+bool session::send_options_to_client() {
+    auto b = true;
+    if (this->player) {
+        auto ordered_json = nlohmann::ordered_json();
+        ordered_json[JSON_KEY_TEXT] = nlohmann::ordered_json::array();
+        for (auto &o: this->player->get_options()) {
+            ordered_json[JSON_KEY_TEXT].emplace_back(i18n(o));
+        }
+        ordered_json[JSON_KEY_TEXT].emplace_back(i18n(MENU_ITEM_NAME_REST));
+        ordered_json[JSON_KEY_TEXT_TYPE] = TEXT_TYPE_OPTIONS;
+        b = this->wss(ordered_json);
+    }
+    return b;
+}
+
+bool session::execute_option(const std::string &option_name) {
     auto b = false;
     if (this->player) {
-        auto stage_id = this->player->action.stage_id;
-        if (this->player->execute(option) || this->move(option) || this->rest(option)) {
-            if (stage_id != this->player->action.stage_id) {
-                this->notify_stage();
+        auto stage_id = this->player->current_stage_event.stage_id;
+        auto stage_event = stage::singleton.find_stage_event(option_name);
+        if (!stage_event.initialized) {
+            auto index = utils::strings::atoi(option_name) - 1;
+            auto options = this->player->get_options();
+            if (index < options.size()) {
+                stage_event = stage::singleton.find_stage_event(options[index]);
+            }
+        }
+        if (stage_event.initialized) {
+            this->player->current_stage_event = stage_event;
+            if (this->player->current_stage_event.maze.initialized && this->player->current_stage_event.maze.floors > 0) {
+                this->wss(i18n(utils::strings::format("ÄãÒÑ½øÈë%s", this->player->current_stage_event.name.c_str())));
+                while (this->player->current_stage_event.maze.current_floor < this->player->current_stage_event.maze.floors) {
+                    this->wss(i18n(utils::strings::format("µ±Ç°Î»ÖÃ£º%s£¬%d²ã", this->player->current_stage_event.name.c_str(), this->player->current_stage_event.maze.current_floor + 1)));
+                    if (this->encounter(this->player->current_stage_event.maze.duration * utils::math::random(90, 110) / 100)) {
+                        if (this->player->is_dead()) {
+                            break;
+                        } else {
+                            this->player->current_stage_event.maze.current_floor++;
+                        }
+                    } else {
+                        break;
+                    }
+                }
+            }
+            for (auto &got: this->player->current_stage_event.got) {
+                this->player->add_item(got);
+            }
+            for (auto &lost: this->player->current_stage_event.lost) {
+                this->player->delete_item(lost);
+            }
+            b = true;
+        }
+        if (b || this->rest(option_name)) {
+            if (stage_id != this->player->current_stage_event.stage_id) {
+                this->send_stage_info_to_client();
             }
             if (this->player->is_dead()) {
                 auto game_over = std::vector<std::string>();
-                game_over.emplace_back("ä½ åœ¨ä¸€æ¬¡æˆ˜æ–—ä¸­ä¸å¹¸é‡éš¾ï¼Œæ²™å°˜æš´æ²™æ¼ å°†ä½ çš„æ®‹éª¸æ·¹æ²¡ã€‚");
-                game_over.emplace_back("ç”±äºç¼ºå°‘æ°´å‡€åŒ–èŠ¯ç‰‡æ¥å‡€åŒ–æ°´æºï¼Œé˜¿ç½—ç”±çš„äººä»¬å†³å®šåœ¨ä¸‹ä¸€æ¬¡è¾å°„é£æš´ä¹‹å‰æ’¤ç¦»è¿™ä¸ªåœ°æ–¹ã€‚");
-                this->notify(game_over);
-                this->notify(GAME_OVER_TEXT);
+                game_over.emplace_back(i18n(GAME_OVER_TEXT1));
+                game_over.emplace_back(i18n(GAME_OVER_TEXT2));
+                this->wss(game_over);
                 b = false;
-            } else {
-                b = this->notify_messages();
             }
         } else {
-            b = this->notify(utils::strings::format("é”™è¯¯ï¼æ²¡æœ‰æ‰¾åˆ°è¯¥å‘½ä»¤ï¼šâ€œ%sâ€ï¼Œå¯èƒ½è¯¥å‘½ä»¤çš„æ‰§è¡Œç¨‹åºå·²ç»åœ¨ä¸Šä¸€æ¬¡å¤§æˆ˜ä¸­ä¸¢å¤±", option.c_str()), STATUS_CODE_NOT_FOUND);
-            utils::console::critical("Missing name: %s, stage: %s(%s)",
-                                     option.c_str(),
-                                     this->player->action.stage_id.c_str(),
-                                     this->player->action.name.c_str());
+            b = this->wss(utils::strings::format(i18n("´íÎó£¡Ã»ÓĞÕÒµ½¸ÃÃüÁî£º¡°%s¡±£¬¿ÉÄÜ¸ÃÃüÁîµÄÖ´ĞĞ³ÌĞòÒÑ¾­ÔÚÉÏÒ»´Î´óÕ½ÖĞ¶ªÊ§"), option_name.c_str()), STATUS_CODE_NOT_FOUND);
+            utils::console::critical("Missing name: '%s', stage: %s(%s)",
+                                     option_name.c_str(),
+                                     this->player->current_stage_event.stage_id.c_str(),
+                                     this->player->current_stage_event.name.c_str());
         }
     }
     if (b) {
-        this->notify_options();
+        this->send_options_to_client();
     }
     return b;
 }
 
-bool session::move(const std::string &option) {
+bool session::confirm_message(const std::string &text) {
     auto b = false;
-    if (this->player && !this->player->maze_name.empty() &&
-        this->player->all_maze_maps.find(this->player->maze_name) != this->player->all_maze_maps.end()) {
-        auto maze_map = this->player->all_maze_maps[this->player->maze_name];
-        if (this->player->maze_map_index < maze_map->size()) {
-            auto map = (*maze_map)[this->player->maze_map_index];
-            if (option == MOVE_LEFT) {
-                if (map->is_movable(this->player->maze_position_x - 1, this->player->maze_position_y)) {
-                    this->player->maze_position_x--;
-                }
+    auto message = text;
+    auto option = std::string();
+    message += "1. ÊÇ";
+    message += "2. ·ñ";
+    do {
+        if (this->wss(i18n(message))) {
+            option = this->read_client_option(INFINITE);
+            if (option == "1") {
                 b = true;
-            } else if (option == MOVE_RIGHT) {
-                if (map->is_movable(this->player->maze_position_x + 1, this->player->maze_position_y)) {
-                    this->player->maze_position_x++;
-                }
-                b = true;
-            } else if (option == MOVE_UP) {
-                if (map->is_movable(this->player->maze_position_x, this->player->maze_position_y - 1)) {
-                    this->player->maze_position_y--;
-                }
-                b = true;
-            } else if (option == MOVE_DOWN) {
-                if (map->is_movable(this->player->maze_position_x, this->player->maze_position_y + 1)) {
-                    this->player->maze_position_y++;
-                }
-                b = true;
+                break;
+            } else if (option == "2") {
+                b = false;
+                break;
             }
         }
-    }
+    } while (!option.empty());
     return b;
 }
 
@@ -462,11 +389,11 @@ bool session::rest(const std::string &option) {
         b = true;
         while (b && this->player->health_point < this->player->max_health_point) {
             this->player->add_health_point(this->player->health_point_recovery_rate);
-            auto native = translate("æ­£åœ¨ä¼‘æ¯ï¼Œè¾“å…¥ä»»æ„å‘½ä»¤ç»“æŸ...ã€€å½“å‰ç”Ÿå‘½å€¼ï¼š{1}/{2}", this->language);
-            native = utils::strings::replace(native, "{1}", utils::strings::itoa(this->player->health_point));
-            native = utils::strings::replace(native, "{2}", utils::strings::itoa(this->player->max_health_point));
-            b = this->notify(native);
-            if (!this->read(1000).empty()) {
+            auto native = utils::strings::format("ÕıÔÚĞİÏ¢£¬ÊäÈëÈÎÒâÃüÁî½áÊø...¡¡µ±Ç°ÉúÃüÖµ£º%s/%s",
+                                                 utils::strings::itoa(this->player->health_point).c_str(),
+                                                 utils::strings::itoa(this->player->max_health_point).c_str());
+            b = this->wss(i18n(native));
+            if (!this->read_client_json(1000).empty()) {
                 break;
             }
         }
@@ -476,35 +403,45 @@ bool session::rest(const std::string &option) {
 
 bool session::encounter(int duration) {
     auto b = false;
-    if (this->player) {
+    if (this->player && duration > 0) {
         b = true;
-        auto start_time = std::chrono::high_resolution_clock::now();
+        auto start_time = NOW;
+        auto inline_text_initialized = false;
         while (b && !this->player->is_dead()) {
-            auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start_time).count();
-            auto progress = 100;
-            if (duration > 0) {
-                progress = milliseconds >= duration ? 100 : (int) (((double) milliseconds / (double) duration) * 100);
+            if (!inline_text_initialized) {
+                b = b && this->wss(i18n(utils::strings::format(MAZE_FLOOR_PROGRESS_TEXT, "0")));
+                inline_text_initialized = true;
             }
-            b = b && this->notify(utils::strings::format(
-                    "%s... (%s%%)",
-                    translate(ENCOUNTER_TEXT, this->language).c_str(),
-                    utils::console::yellow(utils::strings::itoa(MIN(progress, 100))).c_str()));
-            if (progress >= 100) {
-                break;
-            } else if (utils::math::random(1, 100) <= MAX_ENCOUNTER_RAGE) {
-                auto monsters = this->random_monsters();
-                auto monsters_name = std::string();
-                for (const auto &monster: monsters) {
-                    if (!monsters_name.empty()) {
-                        monsters_name += "ï¼Œ";
+            auto milliseconds = utils::datetime::duration(start_time);
+            auto progress = milliseconds >= duration ? 100 : (int) (((double) milliseconds / (double) duration) * 100);
+            auto progress_text = utils::strings::itoa(MIN(progress, 100));
+            b = b && this->send_inline_text_to_client(i18n(utils::strings::format(MAZE_FLOOR_PROGRESS_TEXT, progress_text.c_str())));
+            if (b) {
+                if (progress >= 100) {
+                    break;
+                } else if (utils::math::random(1, 100) <= ENCOUNTER_ODDS) {
+                    auto monsters = this->random_monsters();
+                    auto monsters_name = std::string();
+                    for (const auto &monster: monsters) {
+                        if (!monsters_name.empty()) {
+                            monsters_name += ", ";
+                        }
+                        monsters_name += monster->name;
                     }
-                    monsters_name += utils::console::yellow(monster->name);
+                    b = b && this->wss(i18n(utils::strings::format("%s%s", ENCOUNTER_TEXT, monsters_name.c_str())));
+                    b = b && this->fight(monsters);
+                    if (this->player->is_dead()) {
+                        break;
+                    }
+                    b = b && this->wss(i18n(utils::strings::format(MAZE_FLOOR_PROGRESS_TEXT, progress_text.c_str())));
+                    monsters.clear();
                 }
-                b = b && this->notify(utils::strings::format("%s%s", translate(ENCOUNTER_TEXT, this->language).c_str(), monsters_name.c_str()));
-                b = b && this->fight(monsters);
-                monsters.clear();
+                if (!this->read_client_json(ENCOUNTER_POLLING_MILLISECONDS).empty()) {
+                    if (this->confirm_message(i18n("ÄãÏ£ÍûÁ¢¼´Àë¿ªµ±Ç°µØÏÂ³ÇÂğ£¿"))) {
+                        b = false;
+                    }
+                }
             }
-            utils::threading::sleep(ENCOUNTER_MILLISECONDS);
         }
     }
     return b;
@@ -513,17 +450,16 @@ bool session::encounter(int duration) {
 std::vector<unit *> session::random_monsters() const {
     auto monsters = std::vector<unit *>();
     if (this->player) {
-        auto stage_root = stage::singleton.stage_root(this->player->action.stage_id);
-        if (!stage_root.monsters.empty()) {
+        auto item = stage::singleton.find_stage_entrance_event(this->player->current_stage_event.stage_id);
+        if (!item.monsters.empty()) {
             auto monsters_template = std::vector<unit>();
-            for (auto &monster: stage_root.monsters) {
+            for (auto &monster: item.monsters) {
                 monsters_template.emplace_back(*monster);
             }
             auto monster_count = utils::math::random(1, MAX_ENCOUNTER_MONSTER);
             for (auto i = 0; i < monster_count; i++) {
                 auto monster = new unit();
                 *monster = monsters_template[utils::math::random(0, (int) monsters_template.size() - 1)];
-                monster->name = translate(monster->name, this->language);
                 auto exists = 0;
                 for (auto &e: monsters) {
                     if (utils::strings::starts_with(e->name, monster->name)) {
@@ -543,7 +479,7 @@ std::vector<unit *> session::random_monsters() const {
 bool session::fight(std::vector<unit *> &unit1, std::vector<unit *> &unit2) {
     auto p = const_cast<session *>(this);
     auto b = true;
-    auto extract_living = [&](std::vector<unit *> &group) -> std::vector<unit *> {
+    auto get_alive_units = [&](std::vector<unit *> &group) -> std::vector<unit *> {
         std::vector<unit *> living;
         for (auto &e: group) {
             if (!e->is_dead()) {
@@ -553,7 +489,7 @@ bool session::fight(std::vector<unit *> &unit1, std::vector<unit *> &unit2) {
         return living;
     };
 
-    auto extract_fastest = [&](std::vector<unit *> &unit1, std::vector<unit *> &unit2, bool &is_unit1) -> unit * {
+    auto get_fastest_unit = [&](std::vector<unit *> &unit1, std::vector<unit *> &unit2, bool &is_unit1) -> unit * {
         auto fastest = (class unit *) nullptr;
         auto iterator = std::vector<unit *>::iterator();
         for (auto it = unit1.begin(); it != unit1.end(); it++) {
@@ -578,7 +514,7 @@ bool session::fight(std::vector<unit *> &unit1, std::vector<unit *> &unit2) {
         return fastest;
     };
 
-    auto is_all_unit_down = [&](std::vector<unit *> &units) -> bool {
+    auto is_all_units_down = [&](std::vector<unit *> &units) -> bool {
         auto knock_down = 0;
         for (auto &e: units) {
             if (e->is_dead()) {
@@ -587,13 +523,14 @@ bool session::fight(std::vector<unit *> &unit1, std::vector<unit *> &unit2) {
         }
         return knock_down == units.size();
     };
-    auto is_fight_end = [&](std::vector<unit *> &units1, std::vector<unit *> &units2) -> bool {
-        return is_all_unit_down(units1) || is_all_unit_down(units2);
+
+    auto can_fight = [&](std::vector<unit *> &units1, std::vector<unit *> &units2) -> bool {
+        return !is_all_units_down(units1) && !is_all_units_down(units2);
     };
 
     auto fighting = [&](unit *attacker, std::vector<unit *> &defenders) -> bool {
         auto b = true;
-        auto _defenders = extract_living(defenders);
+        auto _defenders = get_alive_units(defenders);
         if (!_defenders.empty()) {
             auto defender = _defenders.at(0);
             auto damage = (int) ((attacker->power - defender->defensive) * (utils::math::random(90, 110) / 100.0));
@@ -603,22 +540,22 @@ bool session::fight(std::vector<unit *> &unit1, std::vector<unit *> &unit2) {
             auto previous_health_point = defender->health_point;
             defender->add_health_point(damage * -1);
 
-            auto native = translate(ATTACK_ROUND_TEXT, this->language);
-            native = utils::strings::replace(native, "{1}", utils::console::yellow(translate(attacker->is_player() ? YOU_TEXT : attacker->name, this->language)));
-            native = utils::strings::replace(native, "{2}", utils::console::yellow(translate(defender->is_player() ? YOU_TEXT : defender->name, this->language)));
-            native = utils::strings::replace(native, "{3}", utils::console::yellow(utils::strings::itoa(damage)));
-            native = utils::strings::replace(native, "{4}", translate(defender->is_player() ? YOU_TEXT : defender->name, this->language));
-            native = utils::strings::replace(native, "{5}", utils::strings::itoa(previous_health_point));
-            native = utils::strings::replace(native, "{6}", utils::strings::itoa(defender->health_point));
-            if (p->notify(native)) {
+            auto message = std::string(ATTACK_ROUND_TEXT);
+            message = utils::strings::replace(message, "{1}", attacker->is_player() ? YOU_TEXT : attacker->name);
+            message = utils::strings::replace(message, "{2}", defender->is_player() ? YOU_TEXT : defender->name);
+            message = utils::strings::replace(message, "{3}", utils::strings::itoa(damage));
+            message = utils::strings::replace(message, "{4}", defender->is_player() ? YOU_TEXT : defender->name);
+            message = utils::strings::replace(message, "{5}", utils::strings::itoa(previous_health_point));
+            message = utils::strings::replace(message, "{6}", utils::strings::itoa(defender->health_point));
+            if (p->wss(i18n(message))) {
                 if (defender->is_dead()) {
-                    native = translate(KNOCKDOWN_TEXT, this->language);
-                    native = utils::strings::replace(native, "{1}", translate(defender->is_player() ? YOU_TEXT : defender->name, this->language));
-                    b = b && p->notify(native);
+                    message = KNOCKDOWN_TEXT;
+                    message = utils::strings::replace(message, "{1}", defender->is_player() ? YOU_TEXT : defender->name);
+                    b = b && p->wss(i18n(message));
                     if (b && attacker->is_player() && defender->experience > 0) {
-                        native = utils::console::green(translate(GOT_EXPERIENCE_TEXT, this->language));
-                        native = utils::strings::replace(native, "{1}", utils::console::yellow(utils::strings::itoa(defender->experience)) + "\x1b[32m");
-                        b = b && p->notify(native);
+                        message = GOT_EXPERIENCE_TEXT;
+                        message = utils::strings::replace(message, "{1}", utils::strings::itoa(defender->experience));
+                        b = b && p->wss(i18n(message));
                         auto previous_level = attacker->level;
                         auto previous_max_health_point = attacker->max_health_point;
                         auto previous_power = attacker->power;
@@ -626,19 +563,19 @@ bool session::fight(std::vector<unit *> &unit1, std::vector<unit *> &unit2) {
                         auto previous_agility = attacker->agility;
                         attacker->add_experience(defender->experience);
                         if (attacker->level != previous_level) {
-                            auto report_level_detail = [&](const std::string &ability_name, int value, int previous_value) -> bool {
-                                native = translate(ABILITY_UP_TEXT, this->language);
-                                native = utils::strings::replace(native, "{1}", utils::console::yellow(translate(ability_name, this->language)) + "\x1b[32m");
-                                native = utils::strings::replace(native, "{2}", utils::console::yellow(utils::strings::itoa(value - previous_value)) + "\x1b[32m");
-                                native = utils::strings::replace(native, "{3}", utils::console::yellow(utils::strings::itoa(previous_value)) + "\x1b[32m");
-                                native = utils::strings::replace(native, "{4}", utils::console::yellow(utils::strings::itoa(value)) + "\x1b[32m");
-                                return p->notify(native);
+                            auto send_level_up_message = [&](const std::string &ability_name, int value, int previous_value) -> bool {
+                                message = ABILITY_UP_TEXT;
+                                message = utils::strings::replace(message, "{1}", ability_name);
+                                message = utils::strings::replace(message, "{2}", utils::strings::itoa(value - previous_value));
+                                message = utils::strings::replace(message, "{3}", utils::strings::itoa(previous_value));
+                                message = utils::strings::replace(message, "{4}", utils::strings::itoa(value));
+                                return p->wss(i18n(message));
                             };
-                            native = utils::console::green(translate(LEVEL_UP_TEXT, this->language));
-                            b = b && report_level_detail(ABILITY_NAME_MAX_HEALTH_POINT_TEXT, attacker->max_health_point, previous_max_health_point);
-                            b = b && report_level_detail(ABILITY_NAME_POWER_TEXT, attacker->power, previous_power);
-                            b = b && report_level_detail(ABILITY_NAME_DEFENSIVE_TEXT, attacker->defensive, previous_defensive);
-                            b = b && report_level_detail(ABILITY_NAME_AGILITY_TEXT, attacker->agility, previous_agility);
+                            message = LEVEL_UP_TEXT;
+                            b = b && send_level_up_message(ABILITY_NAME_MAX_HEALTH_POINT_TEXT, attacker->max_health_point, previous_max_health_point);
+                            b = b && send_level_up_message(ABILITY_NAME_POWER_TEXT, attacker->power, previous_power);
+                            b = b && send_level_up_message(ABILITY_NAME_DEFENSIVE_TEXT, attacker->defensive, previous_defensive);
+                            b = b && send_level_up_message(ABILITY_NAME_AGILITY_TEXT, attacker->agility, previous_agility);
                         }
                     }
                 }
@@ -656,21 +593,26 @@ bool session::fight(std::vector<unit *> &unit1, std::vector<unit *> &unit2) {
     // original attack group 1 and the original attack group 2 for calculation.
     // If the character belongs to attack group 1, then let him fight against attack group 2,
     // if the character belongs to attack group 2, then let him fight against attack group 1.
-    auto units1 = extract_living(unit1);
-    auto units2 = extract_living(unit2);
+    auto units1 = get_alive_units(unit1);
+    auto units2 = get_alive_units(unit2);
     auto attackers1 = std::vector<unit *>(units1);
     auto attackers2 = std::vector<unit *>(units2);
-    while (b && !is_fight_end(units1, units2)) {
-        auto is_unit1 = true;
-        auto fastest = extract_fastest(attackers1, attackers2, is_unit1);
+    while (b && can_fight(units1, units2)) {
+        auto is_units1 = true;
+        auto fastest = get_fastest_unit(attackers1, attackers2, is_units1);
         if (fastest) {
-            b = fighting(fastest, is_unit1 ? units2 : units1);
+            b = fighting(fastest, is_units1 ? units2 : units1);
 
-            // All pending attackers are executed or the attacker who is pending for attack may already be knocked down in previous round,
-            // so check if the attacker who is knocked down, if the attacker has been knocked out, then find a new character
-            if ((attackers1.empty() && attackers2.empty()) || (is_all_unit_down(attackers1) && is_all_unit_down(attackers2))) {
-                attackers1 = extract_living(units1);
-                attackers2 = extract_living(units2);
+            // ¼ì²éËùÓĞµ¥Î»ÊÇ·ñ¶¼½ø¹¥ÁË
+            auto is_attackers_empty = false;
+            is_attackers_empty |= attackers1.empty() && attackers2.empty();
+            is_attackers_empty |= is_all_units_down(attackers1) && is_all_units_down(attackers2);
+
+            // ËùÓĞµ¥Î»ÊÇ·ñ¶¼½ø¹¥ÁË£¬¼ì²éÊÇ·ñ»¹ÓĞ´æ»îµÄµ¥Î»
+            // Èç¹ûË«·½¶¼ÓĞ´æ»îµ¥Î»£¬ÄÇÃ´½øÈëÏÂÒ»»ØºÏ
+            if (is_attackers_empty) {
+                attackers1 = get_alive_units(units1);
+                attackers2 = get_alive_units(units2);
             }
         } else {
             break;
@@ -685,4 +627,6 @@ bool session::fight(std::vector<unit *> &units) {
     return this->fight(group, units);
 }
 
+#ifdef MAC
 #pragma clang diagnostic pop
+#endif

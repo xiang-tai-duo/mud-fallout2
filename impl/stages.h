@@ -17,48 +17,51 @@
 
 class unit;
 
-struct STAGE_ACTION {
-    std::string stage_id;
-    bool is_root;
-    std::string name;
-    bool entrance;
+struct STAGE_EVENT_ITEM {
+    bool initialized{};
+    std::string stage_id{};
+    bool is_entrance_event{};   // 事件是否是入口事件
+    std::string name{};
+    bool is_entrance_stage{};   // 是否是新用户的入口场景
     struct MAZE {
-        bool has_maze;
-        int width;
-        int height;
-        int floors;
-        int duration;
-    } maze;
+        bool initialized;
+        int floors;             // 地下城有多少层
+        int duration;           // 每一层要使用的时间
+        int current_floor;
+    } maze{};
     std::vector<std::string> messages;
     std::vector<class unit *> monsters;
     std::vector<std::string> options;
-    std::string next_action;
+    std::string next_action{};
     std::vector<std::string> must;
     std::vector<std::string> denied;
     std::vector<std::string> got;
     std::vector<std::string> lost;
+    STAGE_EVENT_ITEM() {
+        memset(&this->maze, 0, sizeof(this->maze));
+    }
 };
 
 class stage {
 public:
     stage();
 
-    STAGE_ACTION entrance();
+    STAGE_EVENT_ITEM entrance();
 
-    STAGE_ACTION get(const std::string &);
+    STAGE_EVENT_ITEM find_stage_event(const std::string &);
 
-    STAGE_ACTION stage_root(const std::string &);
+    STAGE_EVENT_ITEM find_stage_entrance_event(const std::string &id);
 
     static stage singleton;
 
 protected:
-    static STAGE_ACTION init(const nlohmann::ordered_json &);
+    static STAGE_EVENT_ITEM new_stage_event_item(const nlohmann::ordered_json &);
 
-    void compile(std::vector<STAGE_ACTION> &, const nlohmann::ordered_json &, bool, const std::string &, const std::string &);
+    void compile(std::vector<STAGE_EVENT_ITEM> &, const nlohmann::ordered_json &, bool, const std::string &, const std::string &);
 
     static bool is_keyword(const std::string &);
 
-    std::vector<STAGE_ACTION> m_actions;
+    std::vector<STAGE_EVENT_ITEM> m_items;
 };
 
 #endif //MUD_FALLOUT_STAGE_H

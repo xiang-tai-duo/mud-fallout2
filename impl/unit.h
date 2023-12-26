@@ -10,7 +10,6 @@
 #include <memory>
 #include "stages.h"
 #include "utils.hpp"
-#include "maze.h"
 
 #define MAX_LEVEL 999
 #define SAVE_DIRECTORY_NAME "Save"
@@ -26,8 +25,6 @@ public:
 
     [[maybe_unused]] void save();
 
-    [[maybe_unused]] bool execute(const std::string &);
-
     [[maybe_unused]] void add_health_point();
 
     [[maybe_unused]] void add_health_point(int);
@@ -38,14 +35,13 @@ public:
 
     [[maybe_unused]] void add_experience(int);
 
-    [[maybe_unused]] std::vector<std::string> options();
+    [[maybe_unused]] std::vector<std::string> get_options();
 
     std::string name;
     std::string role;
     std::string password_hash;
-    std::vector<std::string> flags;
-    STAGE_ACTION action;
-    std::map<std::string, std::vector<struct MAZE_MAP *> *> all_maze_maps;
+    std::vector<std::string> items;
+    STAGE_EVENT_ITEM current_stage_event;
     int level{};
     int health_point{};
     int max_health_point{};
@@ -56,21 +52,18 @@ public:
     int agility{};
     int health_point_recovery_rate{};
     int experience{};
-    int maze_position_x{};
-    int maze_position_y{};
-    int maze_map_index{};
-    std::string maze_name;
+
+public:
+    [[maybe_unused]] void add_item(const std::string &);
+
+    [[maybe_unused]] void delete_item(const std::string &);
 
 protected:
     [[maybe_unused]] void init();
 
-    [[maybe_unused]] void add_flag(const std::string &);
+    [[maybe_unused]] bool is_item_exists(const std::string &);
 
-    [[maybe_unused]] void remove_flag(const std::string &);
-
-    [[maybe_unused]] bool is_flag_exists(const std::string &);
-
-    [[maybe_unused]] bool is_valid_option(const std::string &option);
+    [[maybe_unused]] bool is_valid_option(const std::string &);
 };
 
 static class level_table {

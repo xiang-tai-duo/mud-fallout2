@@ -19,8 +19,10 @@
 #include <sstream>
 #include <random>
 #include <fstream>
-#include "nlohmann/json.hpp"
 #include <thread>
+#include <mutex>
+#include <filesystem>
+#include "nlohmann/json.hpp"
 
 #ifdef WINDOWS
 
@@ -47,10 +49,21 @@
 #endif
 
 #ifdef RELEASE
-#define TRACE
+#define TRACE(x) (x)
 #else
 #define TRACE utils::console::trace
 #endif
+
+#ifdef WINDOWS
+#define CP_936                     936
+#define UTF8(x)                    utils::encoding::gbk_to_utf8(x)
+#define GBK(x)                     utils::encoding::utf8_to_gbk(x)
+#else
+#define UTF8(x)                    std::string(x)
+#define GBK(x)                     std::string(x)
+#endif
+
+#define NOW (std::chrono::high_resolution_clock::now())
 
 #define VA_INIT_WIN(var_placeholder, format)                                        \
     std::string s;                                                                  \
@@ -89,7 +102,10 @@ namespace utils {
         inline std::string now(const std::string &);
 
         inline std::string now();
+
+        inline long long duration(std::chrono::time_point<std::chrono::steady_clock> &);
     }
+
     namespace console {
         inline void trace(std::string f, ...);
 
@@ -120,6 +136,7 @@ namespace utils {
 namespace utils {
     namespace console {
         static std::mutex trace_mutex;
+
         inline std::string generate_colors_string() {
             std::string s;
             s += strings::format("\x1b[30m\\x1b[30m\x1b[0m\n");
@@ -160,18 +177,26 @@ namespace utils {
         inline void trace(const std::string f, ...) {
             trace_mutex.lock();
             VA_INIT(f, f);
+#ifdef WINDOWS
+            printf("[%s] %s\n", datetime::now().c_str(), UTF8(s).c_str());
+#else
             printf("[%s] %s\n", datetime::now().c_str(), s.c_str());
+#endif
             fflush(stdout);
             trace_mutex.unlock();
         }
 
         inline void critical(const std::string f, ...) {
             VA_INIT(f, f);
+#ifdef WINDOWS
+            printf("[%s] \x1b[31m%s\x1b[0m\n", datetime::now().c_str(), UTF8(s).c_str());
+#else
             printf("[%s] \x1b[31m%s\x1b[0m\n", datetime::now().c_str(), s.c_str());
+#endif
             fflush(stdout);
         }
 
-        inline void throw_(const std::string f, ...) {
+        inline void _throw(const std::string f, ...) {
             VA_INIT(f, f);
             printf("[%s] \x1b[31m%s\x1b[0m\n", datetime::now().c_str(), s.c_str());
             fflush(stdout);
@@ -200,22 +225,22 @@ namespace utils {
     }
 
     namespace strings {
-        inline bool starts_with(const std::string& big, const std::string& small) {
-            if (&big == &small) return true;
-            const typename std::string::size_type big_size = big.size();
-            const typename std::string::size_type small_size = small.size();
+        inline bool starts_with(const std::string &source, const std::string &find) {
+            if (&source == &find) return true;
+            const typename std::string::size_type big_size = source.size();
+            const typename std::string::size_type small_size = find.size();
             const bool valid_ = (big_size >= small_size);
-            const bool starts_with_ = (big.compare(0, small_size, small) == 0);
-            return valid_ and starts_with_;
+            const bool starts_with_ = (source.compare(0, small_size, find) == 0);
+            return valid_ && starts_with_;
         }
 
-        inline bool ends_with(const std::string& big, const std::string& small) {
+        inline bool ends_with(const std::string &big, const std::string &small) {
             if (&big == &small) return true;
             const typename std::string::size_type big_size = big.size();
             const typename std::string::size_type small_size = small.size();
             const bool valid_ = (big_size >= small_size);
             const bool ends_with_ = (big.compare(big_size - small_size, small_size, small) == 0);
-            return valid_ and ends_with_;
+            return valid_ && ends_with_;
         }
 
         inline std::string format(std::string f, ...) {
@@ -310,12 +335,15 @@ namespace utils {
             }
             return result; // 返回结果
         }
+
+        inline std::string remove_escape_characters(const std::string& s) {
+            return utils::strings::replace(s, "%", "%%");
+        }
     }
 
     namespace encoding {
 
 #ifdef WINDOWS
-#define CP_936 936
 
         inline std::string utf8_to_codepage(const std::string &utf8_str, int code_page) {
             auto s = std::string();
@@ -370,7 +398,7 @@ namespace utils {
         inline std::string get_string(const nlohmann::ordered_json &json, const std::string &key) {
             auto value = std::string();
             if (json.contains(key) && json[key].is_string()) {
-                value = json[key].get<std::string>();
+                value = GBK(json[key].get<std::string>());
             }
             return value;
         }
@@ -403,13 +431,13 @@ namespace utils {
             auto array = std::vector<std::string>();
             if (json.is_object() && json.contains(key)) {
                 if (json[key].is_array()) {
-                    for (const auto & it : json[key]) {
+                    for (const auto &it: json[key]) {
                         if (it.is_string()) {
-                            array.emplace_back(it.get<std::string>());
+                            array.emplace_back(GBK(it.get<std::string>()));
                         }
                     }
                 } else if (json[key].is_string()) {
-                    array.emplace_back(json[key].get<std::string>());
+                    array.emplace_back(GBK(json[key].get<std::string>()));
                 }
             }
             return array;
@@ -449,18 +477,22 @@ namespace utils {
         inline std::string now() {
             return now("%Y-%m-%d %H:%M:%S");
         }
+
+        inline long long duration(std::chrono::time_point<std::chrono::steady_clock> &start_time) {
+            return std::chrono::duration_cast<std::chrono::milliseconds>(NOW -start_time).count();
+        }
     }
 
     namespace directory {
         inline bool is_exists(const std::string &path) {
-            auto p = std::__fs::filesystem::path(path);
-            return std::__fs::filesystem::exists(p) && std::__fs::filesystem::is_directory(p);
+            auto p = std::filesystem::path(path);
+            return std::filesystem::exists(p) && std::filesystem::is_directory(p);
         }
 
         inline std::vector<std::string> get_files(const std::string &path) {
             auto files = std::vector<std::string>();
             if (is_exists(path)) {
-                for (const auto &entry: std::__fs::filesystem::directory_iterator(std::__fs::filesystem::path(path))) {
+                for (const auto &entry: std::filesystem::directory_iterator(std::filesystem::path(path))) {
                     if (entry.is_regular_file()) {
                         files.emplace_back(entry.path().string());
                     }
@@ -472,7 +504,7 @@ namespace utils {
 
     namespace file {
         inline bool is_exists(const std::string &path) {
-            return std::__fs::filesystem::exists(std::__fs::filesystem::path(path));
+            return std::filesystem::exists(std::filesystem::path(path));
         }
 
         inline std::string load(const std::string &path) {

@@ -1,0 +1,104 @@
+﻿<!--suppress ES6ConvertVarToLetConst -->
+<html lang="zh">
+<head>
+    <style>
+        ul li {
+            list-style-type: none;
+        }
+    </style>
+</head>
+<body style="background-color: #0c0c0c; color: white">
+<div>
+    <ul id="ul"
+        style="border-color: transparent; width: 100%; height: 95%; background-color: #0c0c0c; color: white"></ul>
+</div>
+<div style="position: fixed; left: 8px; bottom: 8px;">
+    <label>
+        <input id="input" type="text" style="width: 300px"/>
+    </label>
+    <input type="button" value="Send" onclick="top.send()">
+</div>
+</body>
+<script>
+    top.replaceAll = function (s, find, replace) {
+        return s.replace(new RegExp(find, 'g'), replace);
+    }
+    top.writeNewItem = function (text) {
+        var ul = document.getElementById("ul");
+        var li = document.createElement("li");
+        li.innerHTML = top.replaceAll(text === "" ? " " : text, " ", "&nbsp;");
+        ul.appendChild(li);
+        return li;
+    }
+    top.writeNewHTML = function (text) {
+        var ul = document.getElementById("ul");
+        var li = document.createElement("li");
+        li.innerHTML = text === "" ? " " : text, " ";
+        ul.appendChild(li);
+        return li;
+    }
+    top.wss = new WebSocket("ws://127.0.0.1:9002");
+    top.wss.onmessage = (event) => {
+        var ul = document.getElementById("ul");
+        var items = ul.getElementsByTagName("li");
+        var data = event.data;
+        if (data) {
+            var json = JSON.parse(data);
+            console.log(json);
+            if (json.statusCode === 200) {
+                if (Array.isArray(json.text)) {
+                    if (json.textType === "options") {
+                        if (items.length > 0) {
+                            top.writeNewItem("");
+                        }
+                    }
+                    json.text.forEach((item, index) => {
+                        if (json.textType === "options") {
+                            var li = writeNewItem((index + 1) + ". " + item);
+                            li.onclick = function () {
+                                document.getElementById("input").value = item;
+                                top.send();
+                            };
+                            li.onmouseenter = function () {
+                                li.style.backgroundColor = "white";
+                                li.style.color = "black";
+                            };
+                            li.onmouseleave = function () {
+                                li.style.backgroundColor = "black";
+                                li.style.color = "white";
+                            }
+                            li.style.cursor = "hand";
+                        } else {
+                            top.writeNewItem(item);
+                        }
+                    });
+                } else {
+                    if (json.textType === "inline_text") {
+                        if (items.length > 0) {
+                            ul.removeChild(items[items.length - 1]);
+                        }
+                        top.writeNewItem(json.text);
+                    } else {
+                        top.writeNewItem(json.text);
+                    }
+                }
+            } else if (json.statusCode === 401) {
+                top.wss.send(JSON.stringify({
+                    userName: "1",
+                    password: "1"
+                }));
+            }
+        }
+    };
+
+    top.wss.onclose = () => {
+        top.writeNewHTML("<text style=\"color: red\">服务器的连接已中断。</text>");
+    }
+
+    top.send = function () {
+        var input = document.getElementById("input");
+        top.wss.send(JSON.stringify({option: input.value}));
+        input.value = "";
+    }
+</script>
+</html>

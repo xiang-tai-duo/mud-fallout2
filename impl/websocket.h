@@ -2,6 +2,7 @@
 
 #include "websocket.h"
 #include <websocketpp/common/connection_hdl.hpp>
+#include <functional>
 #include <string>
 #include <map>
 
@@ -9,22 +10,22 @@
 
 class session;
 
-struct SESSION_INFO {
-    class session *engine{};
+struct WSS {
+    class session *session{};
 
     websocketpp::connection_hdl connection;
 
-    SESSION_INFO();
+    WSS();
 
-    ~SESSION_INFO();
+    ~WSS();
 };
 
-void close_session(void *, const std::string &);
+void close_wss_client(void *hdl, const std::string &reason);
 
-void close_session(void *);
+void close_wss_client(void *);
 
-void get_sessions(const std::function<void(std::map<void *, struct SESSION_INFO *> *)> &);
+void enum_wss(const std::function<void(std::map<void *, struct WSS *> *)> &fn);
 
 void listen();
 
-void send_session_data(void *, const std::string &);
+void send_wss_data(void *hdl, const std::string &data);

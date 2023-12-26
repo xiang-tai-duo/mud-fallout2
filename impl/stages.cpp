@@ -1,5 +1,5 @@
 //
-// Created by é»„å…ƒé•­ on 2023/9/14.
+// Created by »ÆÔªÀØ on 2023/9/14.
 //
 
 #include "stages.h"
@@ -9,8 +9,9 @@
 stage stage::singleton;
 
 stage::stage() {
-    this->m_actions.clear();
+    this->m_items.clear();
     utils::console::trace("Initializing stages...");
+    auto is_first_stage = true;
     for (auto &file: utils::directory::get_files(STAGE_DIRECTORY_NAME)) {
         if (utils::strings::ends_with(file, ".json")) {
             auto ifstream = std::ifstream(file);
@@ -18,30 +19,39 @@ stage::stage() {
                 std::string content((std::istreambuf_iterator<char>(ifstream)),
                                     (std::istreambuf_iterator<char>()));
                 ifstream.close();
-                std::vector<STAGE_ACTION> actions;
+                std::vector<STAGE_EVENT_ITEM> items;
                 auto ordered_json = nlohmann::ordered_json::parse(content);
 
-                // jsonè½¬ä¸ºvectorä¾¿äºè°ƒè¯•
-                this->compile(actions,
+                // json×ªÎªvector±ãÓÚµ÷ÊÔ
+                this->compile(items,
                               ordered_json,
                               true,
                               utils::json::get_string(ordered_json, PROPERTY_NAME_STAGE_ID),
                               utils::json::get_string(ordered_json, PROPERTY_NAME_NAME));
-                for (auto i = (int) actions.size() - 1; i >= 0; i--) {
-                    this->m_actions.push_back(actions.at(i));
+                for (auto i = 0; i < items.size(); i++) {
+                    auto item = items.at(i);
+                    if (is_first_stage) {
+                        if (i == 0) {
+                            utils::console::trace(item.name);
+                        } else {
+                            utils::console::trace("%d: %s", i, item.name.c_str());
+                        }
+                    }
+                    this->m_items.insert(this->m_items.begin(), item);
                 }
                 utils::console::trace(utils::strings::format("%s was loaded.", file.c_str()));
+                is_first_stage = false;
             }
         }
     }
 
     auto entrance_count = 0;
-    for (auto &action: this->m_actions) {
-        if (action.entrance) {
+    for (auto &action: this->m_items) {
+        if (action.is_entrance_stage) {
             entrance_count++;
         }
         if (!action.next_action.empty()) {
-            for (auto &e: this->m_actions) {
+            for (auto &e: this->m_items) {
                 if (e.stage_id == action.next_action) {
                     action.options = e.options;
                     break;
@@ -50,16 +60,29 @@ stage::stage() {
         }
     }
     if (entrance_count == 0) {
-        utils::console::throw_("There should be at least one stage with an entrance property.");
+        utils::console::_throw("There should be at least one stage with an entrance property.");
     } else if (entrance_count > 1) {
-        utils::console::throw_("Duplicate entrances were found.");
+        utils::console::_throw("Duplicate entrances were found.");
     }
 }
 
-STAGE_ACTION stage::get(const std::string &action_name) {
-    auto action = STAGE_ACTION();
-    for (auto &a: this->m_actions) {
-        if (a.name == action_name) {
+STAGE_EVENT_ITEM stage::find_stage_event(const std::string &name) {
+    auto item = STAGE_EVENT_ITEM();
+    if (!name.empty()) {
+        for (auto &a: this->m_items) {
+            if (a.name == name) {
+                item = a;
+                break;
+            }
+        }
+    }
+    return item;
+}
+
+STAGE_EVENT_ITEM stage::find_stage_entrance_event(const std::string &id) {
+    auto action = STAGE_EVENT_ITEM();
+    for (auto &a: this->m_items) {
+        if (a.stage_id == id && a.is_entrance_event) {
             action = a;
             break;
         }
@@ -67,21 +90,10 @@ STAGE_ACTION stage::get(const std::string &action_name) {
     return action;
 }
 
-STAGE_ACTION stage::stage_root(const std::string &id) {
-    auto action = STAGE_ACTION();
-    for (auto &a: this->m_actions) {
-        if (a.stage_id == id && a.is_root) {
-            action = a;
-            break;
-        }
-    }
-    return action;
-}
-
-STAGE_ACTION stage::entrance() {
-    auto stage = STAGE_ACTION();
-    for (auto &s: this->m_actions) {
-        if (s.entrance) {
+STAGE_EVENT_ITEM stage::entrance() {
+    auto stage = STAGE_EVENT_ITEM();
+    for (auto &s: this->m_items) {
+        if (s.is_entrance_stage) {
             stage = s;
             break;
         }
@@ -89,6 +101,7 @@ STAGE_ACTION stage::entrance() {
     return stage;
 }
 
+// ´¿Ó¢Óïµ¥´ÊºÍÊı×ÖÈÏÎªÊÇÒ»¸ö½Úµã¹Ø¼ü×Ö£¬¶ø²»ÊÇÄ³Ò»¸öÊÂ¼ş»òÕß¿ÉÑ¡Ïî
 bool stage::is_keyword(const std::string &key) {
     auto b = true;
     for (auto &c: key) {
@@ -100,25 +113,24 @@ bool stage::is_keyword(const std::string &key) {
     return b;
 }
 
-STAGE_ACTION stage::init(const nlohmann::ordered_json &ordered_json) {
-    STAGE_ACTION action;
-    action.name = utils::json::get_string(ordered_json, PROPERTY_NAME_NAME);
-    action.stage_id = utils::json::get_string(ordered_json, PROPERTY_NAME_STAGE_ID);
-    action.entrance = utils::json::get_boolean(ordered_json, PROPERTY_NAME_ENTRANCE);
+STAGE_EVENT_ITEM stage::new_stage_event_item(const nlohmann::ordered_json &ordered_json) {
+    STAGE_EVENT_ITEM item;
+    item.initialized = false;
+    item.name = utils::json::get_string(ordered_json, PROPERTY_NAME_NAME);
+    item.stage_id = utils::json::get_string(ordered_json, PROPERTY_NAME_STAGE_ID);
+    item.is_entrance_stage = utils::json::get_boolean(ordered_json, PROPERTY_NAME_ENTRANCE);
     auto maze_json = utils::json::get_object(ordered_json, PROPERTY_NAME_MAZE);
     if (!maze_json.empty()) {
-        action.maze.width = utils::json::get_integer(maze_json, PROPERTY_NAME_WIDTH);
-        action.maze.height = utils::json::get_integer(maze_json, PROPERTY_NAME_HEIGHT);
-        action.maze.floors = utils::json::get_integer(maze_json, PROPERTY_NAME_FLOORS);
-        action.maze.duration = utils::json::get_integer(maze_json, PROPERTY_NAME_DURATION);
-        action.maze.has_maze = true;
+        item.maze.floors = utils::json::get_integer(maze_json, PROPERTY_NAME_FLOORS);
+        item.maze.duration = utils::json::get_integer(maze_json, PROPERTY_NAME_DURATION);
+        item.maze.initialized = true;
     }
-    action.messages = utils::json::get_strings(ordered_json, PROPERTY_NAME_MESSAGES);
-    action.next_action = utils::json::get_string(ordered_json, PROPERTY_NAME_NEXT_ACTION);
-    action.must = utils::json::get_strings(ordered_json, PROPERTY_NAME_MUST);
-    action.denied = utils::json::get_strings(ordered_json, PROPERTY_NAME_DENIED);
-    action.got = utils::json::get_strings(ordered_json, PROPERTY_NAME_GOT);
-    action.lost = utils::json::get_strings(ordered_json, PROPERTY_NAME_LOST);
+    item.messages = utils::json::get_strings(ordered_json, PROPERTY_NAME_MESSAGES);
+    item.next_action = utils::json::get_string(ordered_json, PROPERTY_NAME_NEXT_ACTION);
+    item.must = utils::json::get_strings(ordered_json, PROPERTY_NAME_MUST);
+    item.denied = utils::json::get_strings(ordered_json, PROPERTY_NAME_DENIED);
+    item.got = utils::json::get_strings(ordered_json, PROPERTY_NAME_GOT);
+    item.lost = utils::json::get_strings(ordered_json, PROPERTY_NAME_LOST);
     auto monsters = utils::json::get_object(ordered_json, PROPERTY_NAME_MONSTERS);
     for (auto &it: monsters) {
         auto monster = new unit();
@@ -130,31 +142,35 @@ STAGE_ACTION stage::init(const nlohmann::ordered_json &ordered_json) {
         monster->defensive = utils::json::get_integer(it, PROPERTY_NAME_DEFENSIVE);
         monster->agility = utils::json::get_integer(it, PROPERTY_NAME_AGILITY);
         monster->experience = utils::json::get_integer(it, PROPERTY_NAME_EXPERIENCE);
-        action.monsters.push_back(monster);
+        item.monsters.push_back(monster);
     }
-    return action;
+    return item;
 }
 
-void stage::compile(std::vector<STAGE_ACTION> &actions, const nlohmann::ordered_json &ordered_json, bool is_root, const std::string &stage_id, const std::string &name) {
-    // è¦å…ˆåˆ¤æ–­è¯¥èŠ‚ç‚¹æ˜¯å¦æ˜¯ç©ºèŠ‚ç‚¹ï¼Œå¦‚æœæ˜¯ç©ºèŠ‚ç‚¹è¯´æ˜è¿™ä¸ªèŠ‚ç‚¹å¼•ç”¨äº†ä¸€ä¸ªå…¶ä»–çš„èŠ‚ç‚¹ï¼Œé‚£ä¹ˆä¸è¦æ·»åŠ è¿™ä¸ªèŠ‚ç‚¹
+void stage::compile(std::vector<STAGE_EVENT_ITEM> &items, const nlohmann::ordered_json &ordered_json, bool is_entrance_event, const std::string &stage_id, const std::string &name) { // NOLINT(*-no-recursion)
+    // ÒªÏÈÅĞ¶Ï¸Ã½ÚµãÊÇ·ñÊÇ¿Õ½Úµã£¬Èç¹ûÊÇ¿Õ½ÚµãËµÃ÷Õâ¸ö½ÚµãÒıÓÃÁËÒ»¸öÆäËûµÄ½Úµã£¬ÄÇÃ´²»ÒªÌí¼ÓÕâ¸ö½Úµã
+    // "[°¢ÂŞÓÉÉñÃí] Àë¿ª±ÜÄÑËù": {}
     if (!ordered_json.empty()) {
-        auto action = stage::init(ordered_json);
-        action.stage_id = stage_id;
-        action.is_root = is_root;
+        auto item = stage::new_stage_event_item(ordered_json);
+        item.initialized = true;
+        item.stage_id = stage_id;
+        item.is_entrance_event = is_entrance_event;
 
-        // è¿™é‡Œè¦æ³¨æ„ç”±äºæ ¹èŠ‚ç‚¹æ˜¯æ²¡æœ‰keyçš„ï¼Œæ‰€ä»¥å¤–é¢ä¼šå…ˆè¯»å–æ ¹èŠ‚ç‚¹çš„nameï¼Œä½œä¸ºkeyä¼ è¿›æ¥
-        action.name = name;
+        // ÕâÀïÒª×¢ÒâÓÉÓÚ¸ù½ÚµãÊÇÃ»ÓĞkeyµÄ£¬ËùÒÔµÚÒ»´Îµ÷ÓÃµÄÊ±ºò»áÏÈ¶ÁÈ¡¸ù½ÚµãµÄnameÊôĞÔ
+        // name: "°¢ÂŞÓÉÉñÃí"£¬×÷Îªkey´«½øÀ´
+        item.name = name;
         for (auto child = ordered_json.begin(); child != ordered_json.end(); child++) {
             if (child->is_object() && !stage::is_keyword(child.key())) {
-                action.options.emplace_back(child.key());
+                item.options.emplace_back(GBK(child.key()));
             }
         }
-        actions.push_back(action);
+        items.push_back(item);
         for (auto child = ordered_json.begin(); child != ordered_json.end(); child++) {
-            if (child->is_object() && !stage::is_keyword(child.key())) {
+            auto key = GBK(child.key());
+            if (child->is_object() && !stage::is_keyword(key)) {
 
-                // å°†objectçš„keyä½œä¸ºnameç»§ç»­é€’å½’è½¬æ¢
-                stage::compile(actions, child.value(), false, stage_id, child.key());
+                // ½«objectµÄkey: "[°¢ÂŞÓÉÉñÃí] ³¢ÊÔÓÃ´¸×Ó±©Á¦ÆÆ½âÃæ°å" ×÷Îªname¼ÌĞøµİ¹é×ª»»
+                stage::compile(items, child.value(), false, stage_id, key);
             }
         }
     }

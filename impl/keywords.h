@@ -7,6 +7,7 @@
 
 #include <json.hpp>
 #include <fstream>
+#include "utils.hpp"
 
 #define KEYWORD_JSON_FILE_NAME "Config/keywords.json"
 
