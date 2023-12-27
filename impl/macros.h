@@ -36,6 +36,7 @@
 #define JSON_KEY_TEXT                           "text"
 #define JSON_KEY_TEXT_TYPE                      "textType"
 #define JSON_KEY_OPTION                         "option"
+#define JSON_KEY_IMAGE                          "image"
 #define JSON_KEY_MAZE                           "maze"
 #define JSON_KEY_ENTRANCE                       "entrance"
 #define JSON_KEY_EXIT                           "exit"
@@ -85,13 +86,15 @@
 #define PROPERTY_NAME_AGILITY                   "agility"
 #define PROPERTY_NAME_EXPERIENCE                "experience"
 #define PROPERTY_NAME_CURRENT_STAGE_EVENT_NAME  "current_stage_event_name"
-#define PROPERTY_NAME_MESSAGES                  "messages"
+#define PROPERTY_NAME_WELCOME                   "welcome"
+#define PROPERTY_NAME_IMAGE                     "image"
 #define PROPERTY_NAME_GOT                       "got"
 #define PROPERTY_NAME_LOST                      "lost"
 #define PROPERTY_NAME_MUST                      "must"
 #define PROPERTY_NAME_DENIED                    "denied"
 #define PROPERTY_NAME_NEXT_ACTION               "next_action"
 #define PROPERTY_NAME_DURATION                  "duration"
+#define PROPERTY_NAME_MAX_MONSTER_COUNT         "max_monster_count"
 
 #define MAX_RECEIVE_BUFFER_SIZE                 1000
 #define POLLING_MILLISECONDS                    1000
@@ -100,7 +103,7 @@
 #define REST_DELAY_MILLISECONDS                 1000
 #define MOVE_DELAY_MILLISECONDS                 200
 #define STATUS_DELAY_MILLISECONDS               100
-#define ENCOUNTER_ODDS                          20
+#define ENCOUNTER_ODDS                          30
 #define MAX_ENCOUNTER_MONSTER                   6
 #define MACRO_PLAYER_NAME                       "{PLAYER_NAME}"
 

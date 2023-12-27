@@ -23,7 +23,7 @@ public:
 
     [[maybe_unused]] void push_message(const std::string &);
 
-    [[maybe_unused]] bool reset_messages();
+    [[maybe_unused]] bool clear_messages_cache();
 
     [[maybe_unused]] bool wss(const nlohmann::ordered_json &);
 
@@ -35,9 +35,9 @@ public:
 
     [[maybe_unused]] bool send_inline_text_to_client(const std::string &);
 
-    [[maybe_unused]] bool send_stage_info_to_client();
-
     [[maybe_unused]] bool send_options_to_client();
+
+    [[maybe_unused]] bool send_rest_to_client();
 
     [[maybe_unused]] bool execute_option(const std::string &event_index);
 
@@ -47,15 +47,19 @@ public:
 
     [[maybe_unused]] bool encounter(int);
 
-    [[maybe_unused]] bool wss();
+    [[maybe_unused]] bool send_stage_event_info_to_client();
 
-    [[maybe_unused]] std::vector<unit *> random_monsters() const;
+    [[maybe_unused]] bool send_stage_event_info_to_client(const STAGE_EVENT_ITEM *stage);
+
+    [[maybe_unused]] bool send_stage_entrance_info_to_client();
+
+    [[maybe_unused]] [[nodiscard]] std::vector<unit *> random_monsters() const;
 
     [[maybe_unused]] bool fight(std::vector<unit *> &, std::vector<unit *> &);
 
     [[maybe_unused]] bool fight(std::vector<unit *> &);
 
-    [[maybe_unused]] bool login(const std::string &, const std::string &, bool);
+    [[maybe_unused]] bool login(const std::string &, const std::string &);
 
     [[maybe_unused]] unit *get_player() { return this->player; }
 

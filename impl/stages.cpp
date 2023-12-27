@@ -47,7 +47,7 @@ stage::stage() {
 
     auto entrance_count = 0;
     for (auto &action: this->m_items) {
-        if (action.is_entrance_stage) {
+        if (action.entrance) {
             entrance_count++;
         }
         if (!action.next_action.empty()) {
@@ -93,7 +93,7 @@ STAGE_EVENT_ITEM stage::find_stage_entrance_event(const std::string &id) {
 STAGE_EVENT_ITEM stage::entrance() {
     auto stage = STAGE_EVENT_ITEM();
     for (auto &s: this->m_items) {
-        if (s.is_entrance_stage) {
+        if (s.entrance) {
             stage = s;
             break;
         }
@@ -118,14 +118,14 @@ STAGE_EVENT_ITEM stage::new_stage_event_item(const nlohmann::ordered_json &order
     item.initialized = false;
     item.name = utils::json::get_string(ordered_json, PROPERTY_NAME_NAME);
     item.stage_id = utils::json::get_string(ordered_json, PROPERTY_NAME_STAGE_ID);
-    item.is_entrance_stage = utils::json::get_boolean(ordered_json, PROPERTY_NAME_ENTRANCE);
+    item.entrance = utils::json::get_boolean(ordered_json, PROPERTY_NAME_ENTRANCE);
     auto maze_json = utils::json::get_object(ordered_json, PROPERTY_NAME_MAZE);
     if (!maze_json.empty()) {
-        item.maze.floors = utils::json::get_integer(maze_json, PROPERTY_NAME_FLOORS);
         item.maze.duration = utils::json::get_integer(maze_json, PROPERTY_NAME_DURATION);
-        item.maze.initialized = true;
+        item.maze.max_monster_count = utils::json::get_integer(maze_json, PROPERTY_NAME_MAX_MONSTER_COUNT);
     }
-    item.messages = utils::json::get_strings(ordered_json, PROPERTY_NAME_MESSAGES);
+    item.welcome = utils::json::get_strings(ordered_json, PROPERTY_NAME_WELCOME);
+    item.image = utils::json::get_string(ordered_json, PROPERTY_NAME_IMAGE);
     item.next_action = utils::json::get_string(ordered_json, PROPERTY_NAME_NEXT_ACTION);
     item.must = utils::json::get_strings(ordered_json, PROPERTY_NAME_MUST);
     item.denied = utils::json::get_strings(ordered_json, PROPERTY_NAME_DENIED);

@@ -20,16 +20,15 @@ class unit;
 struct STAGE_EVENT_ITEM {
     bool initialized{};
     std::string stage_id{};
-    bool is_entrance_event{};   // 事件是否是入口事件
+    bool is_entrance_event{};               // 事件是否是入口事件
     std::string name{};
-    bool is_entrance_stage{};   // 是否是新用户的入口场景
+    bool entrance{};                        // 是否是新用户的入口场景
     struct MAZE {
-        bool initialized;
-        int floors;             // 地下城有多少层
-        int duration;           // 每一层要使用的时间
-        int current_floor;
+        int duration;                       // 迷宫探索要使用的时间
+        int max_monster_count;              // 最大遇敌数
     } maze{};
-    std::vector<std::string> messages;
+    std::vector<std::string> welcome;
+    std::string image{};                    // 舞台图片，增加游戏体验
     std::vector<class unit *> monsters;
     std::vector<std::string> options;
     std::string next_action{};

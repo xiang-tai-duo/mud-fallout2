@@ -7,6 +7,7 @@
 #include "sha1.h"
 #include "userdef.hpp"
 #include "websocket.h"
+#include "utils/base64.hpp"
 #include <iostream>
 #include <vector>
 
@@ -45,7 +46,7 @@ void session::main_loop() {
                 user = utils::json::get_string(json, JSON_KEY_USER_NAME);
                 password = utils::json::get_string(json, JSON_KEY_PASSWORD);
             }
-            if (_this->login(user, password, true)) {
+            if (_this->login(user, password)) {
                 std::vector<void *> exists_sessions;
 
                 // 检测是否已经登录
@@ -68,9 +69,9 @@ void session::main_loop() {
                 auto b = true;
                 while (!_this->is_shutdown && b) {
                     if (_this->player->health_point <= _this->player->max_health_point * 0.2) {
-                        b = b && _this->wss(translate("警告：当前生命值低于20%", _this->language));
+                        b = b && _this->wss(utils::html::colors::yellow(translate("警告：当前生命值低于20%", _this->language)));
                     }
-                    auto option = utils::json::get_string(_this->read_client_json(INFINITE), JSON_KEY_OPTION);
+                    auto option = _this->read_client_option(INFINITE);
                     if (option.empty()) {
                         _this->wss(translate("option is empty", _this->language), STATUS_CODE_NOT_ACCEPT);
                     } else {
@@ -105,7 +106,7 @@ nlohmann::ordered_json session::read_client_json(int timeout_milliseconds) {
     auto start_time = NOW;
     auto is_timeout = false;
     auto ready = false;
-    this->reset_messages();
+    this->clear_messages_cache();
     while (!this->is_shutdown && !ready && !is_timeout) {
         is_timeout = false;
         this->messages_mutex.lock();
@@ -137,23 +138,24 @@ void session::push_message(const std::string &s) {
     this->messages_mutex.unlock();
 }
 
-bool session::reset_messages() {
+bool session::clear_messages_cache() {
     this->messages_mutex.lock();
     this->messages.clear();
     this->messages_mutex.unlock();
     return true;
 }
 
-bool session::login(const std::string &user_name, const std::string &password, bool generate_new) {
+bool session::login(const std::string &user_name, const std::string &password) {
+    auto is_new_player = false;
     auto password_hash = utils::hash::sha1(password);
-    std::ifstream save_file(utils::strings::format("%s/%s.json", SAVE_DIRECTORY_NAME, user_name.c_str()));
+    std::ifstream save_file(utils::strings::format("%s/%s.json", SAVE_DIRECTORY_NAME, user_name.c_str()), std::ios::binary);
     if (save_file.is_open()) {
         std::ostringstream ss;
         ss << save_file.rdbuf();
         save_file.close();
         auto content = ss.str();
         if (content.empty()) {
-            generate_new = true;
+            is_new_player = true;
         } else {
             auto json = nlohmann::ordered_json::parse(ss.str());
             auto character = unit::load(json);
@@ -163,13 +165,13 @@ bool session::login(const std::string &user_name, const std::string &password, b
                 if (this->player->current_stage_event.initialized) {
 
                     // 如果场景是地下城的话，下一次登录应该要在场景的入口
-                    if (this->player->current_stage_event.maze.initialized) {
+                    if (this->player->current_stage_event.maze.duration > 0) {
                         this->player->current_stage_event = stage::singleton.find_stage_entrance_event(this->player->current_stage_event.stage_id);
                     }
                 } else {
                     this->player->current_stage_event = stage::singleton.entrance();
                 }
-                this->send_stage_info_to_client();
+                this->send_stage_entrance_info_to_client();
 
                 // 如果玩家生命值为0，那么把生命值改为1
                 this->player->health_point = utils::math::max(this->player->health_point, 1);
@@ -177,7 +179,7 @@ bool session::login(const std::string &user_name, const std::string &password, b
             }
         }
     }
-    if (generate_new) {
+    if (is_new_player) {
         this->player = new unit();
         this->player->name = user_name;
         this->player->role = ROLE_PLAYER;
@@ -257,30 +259,56 @@ bool session::send_inline_text_to_client(const std::string &utf8) {
     return this->wss(ordered_json);
 }
 
-bool session::send_stage_info_to_client() {
+bool session::send_stage_event_info_to_client(const STAGE_EVENT_ITEM* stage) {
     auto b = true;
-    if (this->player->current_stage_event.initialized) {
-        auto stage = stage::singleton.find_stage_entrance_event(this->player->current_stage_event.stage_id);
+    if (stage && stage->initialized) {
+        if (stage->is_entrance_event) {
+            b = b && this->wss(utils::html::colors::yellow(i18n("* " + stage->name)));
+        }
         auto ordered_json = nlohmann::ordered_json();
-        ordered_json[JSON_KEY_TEXT] = nlohmann::ordered_json::array();
-        ordered_json[JSON_KEY_TEXT].emplace_back(i18n(utils::strings::format("* %s", stage.name.c_str())));
-        for (auto &message: stage.messages) {
-            ordered_json[JSON_KEY_TEXT].emplace_back(i18n(utils::strings::format("  %s", message.c_str())));
+        ordered_json[JSON_KEY_TEXT] = nlohmann::ordered_json();
+        for (auto &e: stage->welcome) {
+            auto text = std::string();
+            if (stage->is_entrance_event) {
+                text = std::string(" ") + i18n(e);
+            } else {
+                text = i18n(e);
+            }
+            ordered_json[JSON_KEY_TEXT].push_back(text);
+        }
+
+        // 舞台事件的图片
+        if (!stage->image.empty()) {
+            std::ifstream image_file(stage->image, std::ios::binary);
+            if (image_file.is_open()) {
+                std::string ss((std::istreambuf_iterator<char>(image_file)), std::istreambuf_iterator<char>());
+                image_file.close();
+                auto base64 = std::string();
+                base64 += "data:image/jpeg;base64,";
+                base64 += base64::to_base64(ss);
+                ordered_json[JSON_KEY_IMAGE] = base64;
+            }
         }
         b = this->wss(ordered_json);
     }
     return b;
 }
 
-bool session::wss() {
+bool session::send_stage_event_info_to_client() {
     auto b = true;
-    if (this->player) {
-        auto ordered_json = nlohmann::ordered_json();
-        ordered_json[JSON_KEY_TEXT] = nlohmann::ordered_json();
-        for (auto &e: this->player->current_stage_event.messages) {
-            ordered_json[JSON_KEY_TEXT].push_back(i18n(e));
+    if (this->player && this->player->current_stage_event.initialized) {
+        b = b && this->send_stage_event_info_to_client(&this->player->current_stage_event);
+    }
+    return b;
+}
+
+bool session::send_stage_entrance_info_to_client() {
+    auto b = true;
+    if (this->player && this->player->current_stage_event.initialized) {
+        auto stage = stage::singleton.find_stage_entrance_event(this->player->current_stage_event.stage_id);
+        if (stage.initialized) {
+            b = b && this->send_stage_event_info_to_client(&stage);
         }
-        b = this->wss(ordered_json);
     }
     return b;
 }
@@ -314,20 +342,12 @@ bool session::execute_option(const std::string &option_name) {
         }
         if (stage_event.initialized) {
             this->player->current_stage_event = stage_event;
-            if (this->player->current_stage_event.maze.initialized && this->player->current_stage_event.maze.floors > 0) {
-                this->wss(i18n(utils::strings::format("你已进入%s", this->player->current_stage_event.name.c_str())));
-                while (this->player->current_stage_event.maze.current_floor < this->player->current_stage_event.maze.floors) {
-                    this->wss(i18n(utils::strings::format("当前位置：%s，%d层", this->player->current_stage_event.name.c_str(), this->player->current_stage_event.maze.current_floor + 1)));
-                    if (this->encounter(this->player->current_stage_event.maze.duration * utils::math::random(90, 110) / 100)) {
-                        if (this->player->is_dead()) {
-                            break;
-                        } else {
-                            this->player->current_stage_event.maze.current_floor++;
-                        }
-                    } else {
-                        break;
-                    }
-                }
+            if (this->player->current_stage_event.maze.duration > 0 &&
+                this->player->current_stage_event.maze.max_monster_count > 0) {
+
+                // 每进入一次地下城的时候都要播报地下城的welcome信息
+                this->send_stage_event_info_to_client();
+                this->encounter(this->player->current_stage_event.maze.duration * utils::math::random(90, 110) / 100);
             }
             for (auto &got: this->player->current_stage_event.got) {
                 this->player->add_item(got);
@@ -338,18 +358,19 @@ bool session::execute_option(const std::string &option_name) {
             b = true;
         }
         if (b || this->rest(option_name)) {
+            b = true;
             if (stage_id != this->player->current_stage_event.stage_id) {
-                this->send_stage_info_to_client();
+                this->send_stage_entrance_info_to_client();
             }
             if (this->player->is_dead()) {
                 auto game_over = std::vector<std::string>();
-                game_over.emplace_back(i18n(GAME_OVER_TEXT1));
-                game_over.emplace_back(i18n(GAME_OVER_TEXT2));
+                game_over.emplace_back(utils::html::colors::red(i18n(GAME_OVER_TEXT1)));
+                game_over.emplace_back(utils::html::colors::red(i18n(GAME_OVER_TEXT2)));
                 this->wss(game_over);
                 b = false;
             }
         } else {
-            b = this->wss(utils::strings::format(i18n("错误！没有找到该命令：“%s”，可能该命令的执行程序已经在上一次大战中丢失"), option_name.c_str()), STATUS_CODE_NOT_FOUND);
+            b = this->wss(utils::strings::replace(i18n("错误！没有找到该命令：“{1}”，可能该命令的执行程序已经在上一次大战中丢失"), "{1}", option_name.c_str()), STATUS_CODE_NOT_FOUND);
             utils::console::critical("Missing name: '%s', stage: %s(%s)",
                                      option_name.c_str(),
                                      this->player->current_stage_event.stage_id.c_str(),
@@ -385,18 +406,20 @@ bool session::confirm_message(const std::string &text) {
 
 bool session::rest(const std::string &option) {
     auto b = false;
-    if (utils::strings::starts_with(MENU_ITEM_NAME_REST, option)) {
+    if (option == GBK(i18n(MENU_ITEM_NAME_REST))) {
         b = true;
         while (b && this->player->health_point < this->player->max_health_point) {
             this->player->add_health_point(this->player->health_point_recovery_rate);
-            auto native = utils::strings::format("正在休息，输入任意命令结束...　当前生命值：%s/%s",
-                                                 utils::strings::itoa(this->player->health_point).c_str(),
-                                                 utils::strings::itoa(this->player->max_health_point).c_str());
-            b = this->wss(i18n(native));
-            if (!this->read_client_json(1000).empty()) {
-                break;
+            auto health_point = utils::html::colors::yellow(utils::strings::itoa(this->player->health_point));
+            auto max_health_point = utils::html::colors::lightgreen(utils::strings::itoa(this->player->max_health_point));
+            if (this->player->health_point == this->player->max_health_point) {
+                health_point = utils::html::colors::lightgreen(utils::strings::itoa(this->player->health_point));
             }
+            auto native = utils::strings::format(i18n("正在休息，当前生命值：%s/%s"), health_point.c_str(), max_health_point.c_str());
+            b = this->wss(native);
+            utils::threading::sleep(REST_DELAY_MILLISECONDS);
         }
+        b = this->wss(utils::html::colors::lightgreen(i18n("生命值已经满。")));
     }
     return b;
 }
@@ -409,17 +432,19 @@ bool session::encounter(int duration) {
         auto inline_text_initialized = false;
         while (b && !this->player->is_dead()) {
             if (!inline_text_initialized) {
-                b = b && this->wss(i18n(utils::strings::format(MAZE_FLOOR_PROGRESS_TEXT, "0")));
+                b = b && this->wss(utils::strings::format(i18n(MAZE_FLOOR_PROGRESS_TEXT), utils::html::colors::lightgreen("0").c_str()));
                 inline_text_initialized = true;
             }
             auto milliseconds = utils::datetime::duration(start_time);
             auto progress = milliseconds >= duration ? 100 : (int) (((double) milliseconds / (double) duration) * 100);
             auto progress_text = utils::strings::itoa(MIN(progress, 100));
-            b = b && this->send_inline_text_to_client(i18n(utils::strings::format(MAZE_FLOOR_PROGRESS_TEXT, progress_text.c_str())));
+            b = b && this->send_inline_text_to_client(utils::strings::format(i18n(MAZE_FLOOR_PROGRESS_TEXT), utils::html::colors::lightgreen(progress_text).c_str()));
             if (b) {
                 if (progress >= 100) {
                     break;
                 } else if (utils::math::random(1, 100) <= ENCOUNTER_ODDS) {
+                    // 战斗开始时间
+                    auto fight_start_time = NOW;
                     auto monsters = this->random_monsters();
                     auto monsters_name = std::string();
                     for (const auto &monster: monsters) {
@@ -430,11 +455,18 @@ bool session::encounter(int duration) {
                     }
                     b = b && this->wss(i18n(utils::strings::format("%s%s", ENCOUNTER_TEXT, monsters_name.c_str())));
                     b = b && this->fight(monsters);
+                    monsters.clear();
                     if (this->player->is_dead()) {
                         break;
+                    } else {
+                        b = b && this->wss(utils::strings::format(i18n(MAZE_FLOOR_PROGRESS_TEXT), utils::html::colors::lightgreen(progress_text).c_str()));
                     }
-                    b = b && this->wss(i18n(utils::strings::format(MAZE_FLOOR_PROGRESS_TEXT, progress_text.c_str())));
-                    monsters.clear();
+
+                    // 计算战斗花费的时间
+                    auto fight_time_milliseconds = utils::datetime::duration(fight_start_time);
+
+                    // 战斗补时间
+                    start_time = utils::datetime::add(fight_time_milliseconds);
                 }
                 if (!this->read_client_json(ENCOUNTER_POLLING_MILLISECONDS).empty()) {
                     if (this->confirm_message(i18n("你希望立即离开当前地下城吗？"))) {
@@ -456,7 +488,8 @@ std::vector<unit *> session::random_monsters() const {
             for (auto &monster: item.monsters) {
                 monsters_template.emplace_back(*monster);
             }
-            auto monster_count = utils::math::random(1, MAX_ENCOUNTER_MONSTER);
+            auto max_monster_count = utils::math::min(MAX_ENCOUNTER_MONSTER, this->player->current_stage_event.maze.max_monster_count);
+            auto monster_count = utils::math::random(1, max_monster_count);
             for (auto i = 0; i < monster_count; i++) {
                 auto monster = new unit();
                 *monster = monsters_template[utils::math::random(0, (int) monsters_template.size() - 1)];
@@ -540,22 +573,22 @@ bool session::fight(std::vector<unit *> &unit1, std::vector<unit *> &unit2) {
             auto previous_health_point = defender->health_point;
             defender->add_health_point(damage * -1);
 
-            auto message = std::string(ATTACK_ROUND_TEXT);
-            message = utils::strings::replace(message, "{1}", attacker->is_player() ? YOU_TEXT : attacker->name);
-            message = utils::strings::replace(message, "{2}", defender->is_player() ? YOU_TEXT : defender->name);
+            auto message = i18n(ATTACK_ROUND_TEXT);
+            message = utils::strings::replace(message, "{1}", attacker->is_player() ? utils::html::colors::lightgreen(i18n(YOU_TEXT)) : utils::html::colors::yellow(i18n(attacker->name)));
+            message = utils::strings::replace(message, "{2}", defender->is_player() ? utils::html::colors::lightgreen(i18n(YOU_TEXT)) : utils::html::colors::yellow(i18n(defender->name)));
             message = utils::strings::replace(message, "{3}", utils::strings::itoa(damage));
-            message = utils::strings::replace(message, "{4}", defender->is_player() ? YOU_TEXT : defender->name);
+            message = utils::strings::replace(message, "{4}", defender->is_player() ? utils::html::colors::lightgreen(i18n(YOU_TEXT)) : utils::html::colors::yellow(i18n(defender->name)));
             message = utils::strings::replace(message, "{5}", utils::strings::itoa(previous_health_point));
             message = utils::strings::replace(message, "{6}", utils::strings::itoa(defender->health_point));
-            if (p->wss(i18n(message))) {
+            if (p->wss(message)) {
                 if (defender->is_dead()) {
-                    message = KNOCKDOWN_TEXT;
-                    message = utils::strings::replace(message, "{1}", defender->is_player() ? YOU_TEXT : defender->name);
-                    b = b && p->wss(i18n(message));
+                    message = i18n(KNOCKDOWN_TEXT);
+                    message = utils::strings::replace(message, "{1}", defender->is_player() ? i18n(YOU_TEXT) : i18n(defender->name));
+                    b = b && p->wss(message);
                     if (b && attacker->is_player() && defender->experience > 0) {
-                        message = GOT_EXPERIENCE_TEXT;
+                        message = i18n(GOT_EXPERIENCE_TEXT);
                         message = utils::strings::replace(message, "{1}", utils::strings::itoa(defender->experience));
-                        b = b && p->wss(i18n(message));
+                        b = b && p->wss(message);
                         auto previous_level = attacker->level;
                         auto previous_max_health_point = attacker->max_health_point;
                         auto previous_power = attacker->power;
@@ -564,12 +597,12 @@ bool session::fight(std::vector<unit *> &unit1, std::vector<unit *> &unit2) {
                         attacker->add_experience(defender->experience);
                         if (attacker->level != previous_level) {
                             auto send_level_up_message = [&](const std::string &ability_name, int value, int previous_value) -> bool {
-                                message = ABILITY_UP_TEXT;
-                                message = utils::strings::replace(message, "{1}", ability_name);
+                                message = i18n(ABILITY_UP_TEXT);
+                                message = utils::strings::replace(message, "{1}", i18n(ability_name));
                                 message = utils::strings::replace(message, "{2}", utils::strings::itoa(value - previous_value));
                                 message = utils::strings::replace(message, "{3}", utils::strings::itoa(previous_value));
                                 message = utils::strings::replace(message, "{4}", utils::strings::itoa(value));
-                                return p->wss(i18n(message));
+                                return p->wss(message);
                             };
                             message = LEVEL_UP_TEXT;
                             b = b && send_level_up_message(ABILITY_NAME_MAX_HEALTH_POINT_TEXT, attacker->max_health_point, previous_max_health_point);

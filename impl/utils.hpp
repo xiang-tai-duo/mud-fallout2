@@ -336,7 +336,7 @@ namespace utils {
             return result; // 返回结果
         }
 
-        inline std::string remove_escape_characters(const std::string& s) {
+        inline std::string remove_escape_characters(const std::string &s) {
             return utils::strings::replace(s, "%", "%%");
         }
     }
@@ -460,8 +460,16 @@ namespace utils {
 #undef max
 #endif
 
+#ifdef min
+#undef min
+#endif
+
         inline int max(int a, int b) {
             return a > b ? a : b;
+        }
+
+        inline int min(int a, int b) {
+            return a < b ? a : b;
         }
     }
 
@@ -476,6 +484,18 @@ namespace utils {
 
         inline std::string now() {
             return now("%Y-%m-%d %H:%M:%S");
+        }
+
+        inline std::chrono::time_point<std::chrono::steady_clock> add(long long milliseconds) {
+
+            // 获取当前时间点
+            auto now = std::chrono::high_resolution_clock::now();
+
+            // 将毫秒数转换为时间间隔
+            std::chrono::milliseconds duration(milliseconds);
+
+            // 计算新的时间点
+            return now + duration;
         }
 
         inline long long duration(std::chrono::time_point<std::chrono::steady_clock> &start_time) {
@@ -538,6 +558,25 @@ namespace utils {
         }
     }
 
+    namespace html {
+        namespace colors {
+            inline std::string red(const std::string &text) {
+                return utils::strings::format("<text style=\"color:red\">%s</text>", text.c_str());
+            }
+
+            inline std::string green(const std::string &text) {
+                return utils::strings::format("<text style=\"color:green\">%s</text>", text.c_str());
+            }
+
+            inline std::string yellow(const std::string &text) {
+                return utils::strings::format("<text style=\"color:yellow\">%s</text>", text.c_str());
+            }
+
+            inline std::string lightgreen(const std::string &text) {
+                return utils::strings::format("<text style=\"color:lightgreen\">%s</text>", text.c_str());
+            }
+        }
+    }
     static class _init_ {
     public:
         _init_() {
